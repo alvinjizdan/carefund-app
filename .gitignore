@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Log files
+*.log
+
+# Build & binary outputs
+bin/
+dist/
+build/
+*.exe
+*.test
+*.out
+*.prof
+
+# Temporary & coverage files
+tmp/
+coverage/
+
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

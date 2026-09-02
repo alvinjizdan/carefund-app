@@ -1,0 +1,1 @@
+ALTER TABLE payment_events ADD COLUMN event_source VARCHAR(30) NOT NULL DEFAULT 'WEBHOOK';

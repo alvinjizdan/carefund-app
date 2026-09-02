@@ -33,6 +33,7 @@ type loginRequest struct {
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, r, domain.ErrInvalidInput)
@@ -45,7 +46,9 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default role: DONOR
 	roles := []string{"DONOR"}
+
 	accessToken, err := h.authSvc.GenerateAccessToken(user, roles)
 	if err != nil {
 		RespondError(w, r, err)
@@ -56,8 +59,9 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	rt := &domain.RefreshToken{
 		UserID:    user.ID,
 		TokenHash: hashRefresh,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour), // 7 days
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
+
 	if err := h.rtRepo.Create(r.Context(), rt); err != nil {
 		RespondError(w, r, err)
 		return
@@ -65,19 +69,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	RespondJSON(w, http.StatusCreated, SuccessResponse{
 		Data: map[string]interface{}{
-			"user": map[string]interface{}{
-				"id":    user.ID,
-				"name":  user.Name,
-				"email": user.Email,
-				"roles": roles,
-			},
-			"access_token": accessToken,
+			"user":          user,
+			"access_token":  accessToken,
 			"refresh_token": rawRefresh,
 		},
 	})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, r, domain.ErrInvalidInput)
@@ -122,6 +122,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
@@ -129,6 +130,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, r, domain.ErrInvalidInput)
 		return
 	}
+
 
 	if req.RefreshToken == "" {
 		RespondError(w, r, domain.ErrInvalidInput)

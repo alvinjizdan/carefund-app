@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -15,6 +16,7 @@ type webhookService struct {
 	donationRepo     domain.DonationRepository
 	paymentEventRepo domain.PaymentEventRepository
 	refundRepo       domain.RefundRepository
+	idempotencyRepo  domain.IdempotencyRepository
 	tx               database.TransactionManager
 }
 
@@ -23,6 +25,12 @@ type WebhookServiceOption func(*webhookService)
 func WithWebhookRefundRepository(repo domain.RefundRepository) WebhookServiceOption {
 	return func(s *webhookService) {
 		s.refundRepo = repo
+	}
+}
+
+func WithWebhookIdempotencyRepository(repo domain.IdempotencyRepository) WebhookServiceOption {
+	return func(s *webhookService) {
+		s.idempotencyRepo = repo
 	}
 }
 
@@ -174,6 +182,26 @@ func (s *webhookService) ProcessNotification(ctx context.Context, notif *domain.
 						_ = s.refundRepo.Update(txCtx, r)
 					}
 				}
+			}
+		}
+
+		if s.idempotencyRepo != nil {
+			if targetPaymentStatus == domain.PaymentStatusCaptured {
+				respObj := map[string]interface{}{
+					"data": map[string]interface{}{
+						"donation_id":   donation.ID,
+						"payment_id":    payment.ID,
+						"order_id":      payment.OrderID,
+						"amount":        donation.Amount,
+						"status":        newDonationStatus,
+						"payment_token": nil,
+						"redirect_url":  nil,
+					},
+				}
+				importJson, _ := json.Marshal(respObj)
+				_ = s.idempotencyRepo.RecoverCompletedByOrderID(txCtx, payment.OrderID, 201, importJson)
+			} else if targetPaymentStatus == domain.PaymentStatusFailed || targetPaymentStatus == domain.PaymentStatusExpired || targetPaymentStatus == domain.PaymentStatusCancelled {
+				_ = s.idempotencyRepo.RecoverFailedByOrderID(txCtx, payment.OrderID)
 			}
 		}
 

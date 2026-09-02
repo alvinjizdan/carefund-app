@@ -12,4 +12,5 @@ require (
 require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/midtrans/midtrans-go v1.3.8 // indirect
+	golang.org/x/time v0.15.0 // indirect
 )

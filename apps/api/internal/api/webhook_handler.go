@@ -32,7 +32,8 @@ func (h *WebhookHandler) MidtransNotification(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Read raw body for persistence
+	// Read raw body for persistence (capped at 1MB)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)

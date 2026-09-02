@@ -28,7 +28,8 @@ func main() {
 	eventRepo := database.NewPaymentEventRepository(db)
 
 	midtransGw := midtrans.NewGateway(cfg)
-	webhookSvc := service.NewWebhookService(payRepo, donRepo, eventRepo, txManager)
+	idempotencyRepo := database.NewIdempotencyRepository(db)
+	webhookSvc := service.NewWebhookService(payRepo, donRepo, eventRepo, txManager, service.WithWebhookIdempotencyRepository(idempotencyRepo))
 	reconSvc := service.NewReconciliationService(payRepo, webhookSvc, midtransGw, txManager)
 
 	ctx := context.Background()

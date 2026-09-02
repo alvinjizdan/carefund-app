@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"carefund-api/internal/api/middleware"
@@ -29,6 +30,7 @@ type createCampaignReq struct {
 
 func (h *CampaignHandler) Create(w http.ResponseWriter, r *http.Request) {
 	authUser := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req createCampaignReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -66,18 +68,36 @@ func (h *CampaignHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CampaignHandler) List(w http.ResponseWriter, r *http.Request) {
-	campaigns, err := h.campSvc.ListCampaigns(r.Context(), 10, 0)
+	limit := 10
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	campaigns, err := h.campSvc.ListCampaigns(r.Context(), limit, offset)
 	if err != nil {
 		RespondError(w, r, err)
 		return
 	}
 
-	RespondJSON(w, http.StatusOK, SuccessResponse{Data: campaigns, Meta: map[string]int{"page": 1, "page_size": 10}})
+	RespondJSON(w, http.StatusOK, SuccessResponse{Data: campaigns, Meta: map[string]int{"limit": limit, "offset": offset}})
 }
 
 func (h *CampaignHandler) Update(w http.ResponseWriter, r *http.Request) {
 	authUser := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)
 	id := r.PathValue("campaign_id")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req createCampaignReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,6 +149,7 @@ func (h *CampaignHandler) Approve(w http.ResponseWriter, r *http.Request) {
 func (h *CampaignHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	authUser := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)
 	id := r.PathValue("campaign_id")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req struct{ Reason string `json:"reason"` }
 	json.NewDecoder(r.Body).Decode(&req)
@@ -139,6 +160,7 @@ func (h *CampaignHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, SuccessResponse{Data: "rejected"})
 }
+
 
 func (h *CampaignHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 	authUser := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)

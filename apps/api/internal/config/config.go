@@ -11,6 +11,8 @@ import (
 
 type Config struct {
 	Port                string
+	MetricsPort         string
+	WorkerMetricsPort   string
 	Env                 string
 	DBHost              string
 	DBPort              string
@@ -58,6 +60,8 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		Port:                getEnv("PORT", "8080"),
+		MetricsPort:         getEnv("METRICS_PORT", "9090"),
+		WorkerMetricsPort:   getEnv("WORKER_METRICS_PORT", "9091"),
 		Env:                 env,
 		DBHost:              getEnv("DB_HOST", "localhost"),
 		DBPort:              getEnv("DB_PORT", "5432"),

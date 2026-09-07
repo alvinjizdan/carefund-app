@@ -8,6 +8,7 @@ import (
 
 	"carefund-api/internal/database"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/metrics"
 	"github.com/google/uuid"
 )
 
@@ -95,6 +96,8 @@ func (s *donationService) CreateDonation(ctx context.Context, donorID string, do
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	metrics.RecordPaymentCreated(p.Provider)
 
 	// 2. Call Payment Gateway (OUTSIDE OF TRANSACTION)
 	res, err := s.paymentGw.CreatePayment(ctx, p, d, donorEmail, donorName)
@@ -191,6 +194,8 @@ func (s *donationService) CreateDonationIdempotent(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	metrics.RecordPaymentCreated(p.Provider)
 
 	// STEP 3: Call Payment Gateway OUTSIDE the transaction.
 	// The idempotency record is PENDING at this point.

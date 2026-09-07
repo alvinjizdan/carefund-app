@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"carefund-api/internal/database"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/logger"
+	"carefund-api/internal/metrics"
 )
 
 type webhookService struct {
@@ -107,7 +108,7 @@ func (s *webhookService) ProcessNotification(ctx context.Context, notif *domain.
 
 	// Helper to mark rejected and return nil (so Midtrans acknowledges)
 	rejectEvent := func(reason string) error {
-		_ = s.paymentEventRepo.MarkRejected(context.Background(), event.ID, reason)
+		_ = s.paymentEventRepo.MarkRejected(ctx, event.ID, reason)
 		return nil
 	}
 
@@ -136,10 +137,12 @@ func (s *webhookService) ProcessNotification(ctx context.Context, notif *domain.
 			return domain.ErrInvalidStateTransition
 		}
 
+		oldStatus := payment.Status
 		payment.Status = targetPaymentStatus
 		if err := s.paymentRepo.UpdateState(txCtx, payment.ID, targetPaymentStatus); err != nil {
 			return err
 		}
+		metrics.RecordPaymentStatusTransition(oldStatus, targetPaymentStatus)
 
 		donation, err := s.donationRepo.FindByID(txCtx, payment.DonationID)
 		if err != nil {
@@ -211,18 +214,27 @@ func (s *webhookService) ProcessNotification(ctx context.Context, notif *domain.
 	if err != nil {
 		// Evaluate exact errors
 		if err.Error() == "amount_mismatch" {
-			log.Printf("[Webhook] Amount mismatch for OrderID %s", notif.OrderID)
+			metrics.RecordPaymentReconciliationMismatch(notif.ProviderStatus, "amount_mismatch")
+			logger.Warn(ctx, "Webhook amount mismatch",
+				logger.F("component", "Webhook"),
+				logger.F("order_id", notif.OrderID),
+				logger.F("gross_amount", notif.GrossAmount),
+			)
 			return rejectEvent(domain.RejectionReasonAmountMismatch)
 		}
 		if err == domain.ErrInvalidStateTransition {
-			log.Printf("[Webhook] Invalid transition for OrderID %s: -> %s", notif.OrderID, notif.ProviderStatus)
+			metrics.RecordPaymentReconciliationMismatch(notif.ProviderStatus, "invalid_state_transition")
+			logger.Warn(ctx, "Webhook invalid state transition rejected",
+				logger.F("component", "Webhook"),
+				logger.F("order_id", notif.OrderID),
+				logger.F("provider_status", notif.ProviderStatus),
+			)
 			return rejectEvent(domain.RejectionReasonInvalidStateTransition)
 		}
-		// Any other internal error implies a DB transaction failure, not a domain rejection.
-		// However, for testing "Rollback" we might need to reject it if it fails?
-		// Actually, if it's a transient DB error, we probably shouldn't REJECT it because it might be retried.
-		// The prompt says: "If Stage B fails: UPDATE payment_event -> REJECTED". Let's do that for any error just in case, but usually we'd want to separate them.
-		// I will just return the error so Midtrans retries, UNLESS it's a domain error.
+		logger.Error(ctx, "Webhook processing failed", err,
+			logger.F("component", "Webhook"),
+			logger.F("order_id", notif.OrderID),
+		)
 		return err
 	}
 

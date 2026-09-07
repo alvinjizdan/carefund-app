@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"carefund-api/internal/domain"
+	"carefund-api/internal/logger"
 )
 
 type ErrorDetail struct {
@@ -60,6 +62,37 @@ func RespondError(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusConflict
 		code = "INVALID_STATE_TRANSITION"
 		msg = err.Error()
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		status = http.StatusGatewayTimeout
+		code = "TIMEOUT"
+		msg = "The request timed out while waiting for a response"
+	} else if errors.Is(err, context.Canceled) {
+		status = 499 // Client Closed Request
+		code = "CLIENT_CLOSED_REQUEST"
+		msg = "The request was cancelled before completion"
+	}
+
+	reqID := logger.GetRequestID(r.Context())
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+
+	if status >= 500 {
+		logger.Error(r.Context(), "HTTP request failed", err,
+			logger.F("component", "HTTP"),
+			logger.F("status", status),
+			logger.F("code", code),
+			logger.F("method", r.Method),
+			logger.F("path", r.URL.Path),
+		)
+	} else {
+		logger.Warn(r.Context(), "HTTP request rejected",
+			logger.F("component", "HTTP"),
+			logger.F("status", status),
+			logger.F("code", code),
+			logger.F("method", r.Method),
+			logger.F("path", r.URL.Path),
+		)
 	}
 
 	RespondJSON(w, status, ErrorResponse{
@@ -67,6 +100,6 @@ func RespondError(w http.ResponseWriter, r *http.Request, err error) {
 			Code:    code,
 			Message: msg,
 		},
-		RequestID: r.Header.Get("X-Request-ID"), // Basic handling
+		RequestID: reqID,
 	})
 }

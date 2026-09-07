@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"carefund-api/internal/domain"
+	"carefund-api/internal/logger"
+	"carefund-api/internal/metrics"
 )
 
 type OutboxWorker interface {
@@ -65,30 +66,46 @@ func NewOutboxWorker(repo domain.OutboxEventRepository, ttl time.Duration, opts 
 func (w *outboxWorker) Start(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	runCycle := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		// 1. Reclaim expired leases
+		reclaimed, err := w.repo.ReclaimExpiredLeases(ctx, w.ttl)
+		if err != nil {
+			logger.Error(ctx, "Failed to reclaim expired leases", err, logger.F("component", "OutboxWorker"))
+		} else if reclaimed > 0 {
+			logger.Info(ctx, "Reclaimed expired outbox leases", logger.F("component", "OutboxWorker"), logger.F("count", reclaimed))
+		}
+
+		// 2. Process all pending
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			hasMore, err := w.ProcessNext(ctx)
+			if err != nil && err != domain.ErrNotFound {
+				logger.Error(ctx, "Error processing event", err, logger.F("component", "OutboxWorker"))
+				break
+			}
+			if !hasMore {
+				break
+			}
+		}
+
+		metrics.RecordWorkerHeartbeat("outbox")
+	}
+
+	// Initial eager pass
+	runCycle()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// 1. Reclaim expired leases
-			reclaimed, err := w.repo.ReclaimExpiredLeases(ctx, w.ttl)
-			if err != nil {
-				log.Printf("[OutboxWorker] Failed to reclaim expired leases: %v", err)
-			} else if reclaimed > 0 {
-				log.Printf("[OutboxWorker] Reclaimed %d expired outbox leases", reclaimed)
-			}
-
-			// 2. Process all pending
-			for {
-				hasMore, err := w.ProcessNext(ctx)
-				if err != nil && err != domain.ErrNotFound {
-					log.Printf("[OutboxWorker] Error processing event: %v", err)
-					break
-				}
-				if !hasMore {
-					break
-				}
-			}
+			runCycle()
 		}
 	}
 }
@@ -106,19 +123,42 @@ func (w *outboxWorker) ProcessNext(ctx context.Context) (bool, error) {
 
 	if err != nil {
 		if event.RetryCount >= domain.MaxOutboxRetryCount {
-			log.Printf("[OutboxWorker] Event %s reached max retries (%d). Marking DEAD_LETTER.", event.ID, event.RetryCount)
+			metrics.RecordOutboxDeadLetter(event.EventType)
+			metrics.RecordFinancialAnomaly(ctx, "dead_letter_growth", "Outbox event moved to DEAD_LETTER after retry exhaustion",
+				logger.F("event_id", event.ID),
+				logger.F("event_type", event.EventType),
+				logger.F("retry_count", event.RetryCount),
+			)
+			logger.Error(ctx, "Event reached max retries, moving to DEAD_LETTER", err,
+				logger.F("component", "OutboxWorker"),
+				logger.F("event_id", event.ID),
+				logger.F("event_type", event.EventType),
+				logger.F("aggregate_id", event.AggregateID),
+				logger.F("retry_count", event.RetryCount),
+			)
 			_ = w.repo.MarkDeadLetter(ctx, event.ID, err.Error())
 			return true, fmt.Errorf("event %s reached max retries (%d) and moved to DEAD_LETTER: %w", event.ID, event.RetryCount, err)
 		}
 
 		nextAvailable := time.Now().Add(getBackoffDuration(event.RetryCount))
+		metrics.RecordOutboxRetry(event.EventType)
 		_ = w.repo.MarkFailed(ctx, event.ID, nextAvailable)
+		logger.Warn(ctx, "Event processing failed, scheduled backoff retry",
+			logger.F("component", "OutboxWorker"),
+			logger.F("event_id", event.ID),
+			logger.F("event_type", event.EventType),
+			logger.F("aggregate_id", event.AggregateID),
+			logger.F("retry_count", event.RetryCount),
+			logger.F("next_available", nextAvailable.Format(time.RFC3339)),
+		)
 		return true, fmt.Errorf("event processing failed: %w", err)
 	}
 
 	if err := w.repo.MarkProcessed(ctx, event.ID); err != nil {
 		return true, fmt.Errorf("failed to mark event processed: %w", err)
 	}
+
+	metrics.RecordWorkerProgress("outbox")
 
 	return true, nil
 }
@@ -144,7 +184,12 @@ func getBackoffDuration(retryCount int) time.Duration {
 }
 
 func (w *outboxWorker) processEvent(ctx context.Context, event *domain.OutboxEvent) error {
-	log.Printf("[OutboxWorker] Processing event: %s %s", event.EventType, event.AggregateID)
+	logger.Info(ctx, "Processing outbox event",
+		logger.F("component", "OutboxWorker"),
+		logger.F("event_id", event.ID),
+		logger.F("event_type", event.EventType),
+		logger.F("aggregate_id", event.AggregateID),
+	)
 
 	if event.EventType == "REFUND_REQUESTED" {
 		if w.paymentGw == nil || w.refundSvc == nil || w.refundRepo == nil || w.paymentRepo == nil {
@@ -191,20 +236,41 @@ func (w *outboxWorker) processEvent(ctx context.Context, event *domain.OutboxEve
 			var rejectionErr *domain.ProviderRejectionError
 			if errors.Is(err, domain.ErrProviderRejected) || errors.As(err, &rejectionErr) {
 				// Definitive provider rejection: mark Refund as FAILED and Outbox as PROCESSED
-				log.Printf("[OutboxWorker] Refund definitively rejected by provider for RefundID %s: %v", refund.ID, err)
+				metrics.RecordRefundProviderResult("rejected")
+				logger.Warn(ctx, "Refund definitively rejected by provider",
+					logger.F("component", "OutboxWorker"),
+					logger.F("refund_id", refund.ID),
+					logger.F("payment_id", payment.ID),
+					logger.F("order_id", payment.OrderID),
+					logger.F("err", err.Error()),
+				)
 				_ = w.refundSvc.FinalizeRefund(ctx, refund.ID, "", domain.RefundStatusFailed)
 				return nil
 			}
 
 			// Ambiguous/transient error: Do NOT mark refund as FAILED; return error to trigger Outbox retry
-			log.Printf("[OutboxWorker] Ambiguous provider failure for RefundID %s: %v. Retrying with backoff...", refund.ID, err)
+			metrics.RecordRefundProviderResult("timeout")
+			logger.Warn(ctx, "Ambiguous provider failure for refund, retrying with backoff",
+				logger.F("component", "OutboxWorker"),
+				logger.F("refund_id", refund.ID),
+				logger.F("payment_id", payment.ID),
+				logger.F("order_id", payment.OrderID),
+				logger.F("err", err.Error()),
+			)
 			return err
 		}
 
 		if res != nil && res.IsCompleted {
+			metrics.RecordRefundProviderResult("success")
 			if err := w.refundSvc.FinalizeRefund(ctx, refund.ID, res.ProviderRefundID, domain.RefundStatusCompleted); err != nil {
 				return fmt.Errorf("failed to finalize completed refund: %w", err)
 			}
+			logger.Info(ctx, "Refund finalized successfully",
+				logger.F("component", "OutboxWorker"),
+				logger.F("refund_id", refund.ID),
+				logger.F("payment_id", payment.ID),
+				logger.F("order_id", payment.OrderID),
+			)
 		}
 
 		return nil

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"carefund-api/internal/api/middleware"
 	"carefund-api/internal/config"
@@ -105,13 +106,15 @@ func NewRouter(
 	mux.Handle("GET /api/v1/me/donations", generalRateLimit(authenticate(http.HandlerFunc(donHandler.ListMyDonations))))
 	mux.Handle("GET /api/v1/payments/{payment_id}", generalRateLimit(authenticate(http.HandlerFunc(donHandler.GetPayment))))
 
-	// Apply Global Middleware: CORS and RequestID/Security Headers
+	// Apply Global Middleware: CORS, Request Timeout, and RequestID/Security Headers
 	allowedOrigins := "http://localhost:3000"
 	if cfg != nil && cfg.CORSAllowedOrigins != "" {
 		allowedOrigins = cfg.CORSAllowedOrigins
 	}
 
-	handler := middleware.CORS(allowedOrigins)(mux)
+	handler := middleware.Metrics()(mux)
+	handler = middleware.Timeout(20 * time.Second)(handler)
+	handler = middleware.CORS(allowedOrigins)(handler)
 	handler = middleware.RequestIDAndSecurityHeaders()(handler)
 
 	return handler

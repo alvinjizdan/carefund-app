@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,22 +14,24 @@ import (
 	"carefund-api/internal/config"
 	"carefund-api/internal/database"
 	"carefund-api/internal/infrastructure/payment/midtrans"
+	"carefund-api/internal/logger"
+	"carefund-api/internal/metrics"
 	"carefund-api/internal/service"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		logger.Fatal(context.Background(), "Failed to load config", err, logger.F("component", "Server"))
 	}
 
 	db, err := database.Connect(cfg)
 	if err != nil {
-		log.Printf("Warning: failed to connect to database: %v", err)
+		logger.Warn(context.Background(), "Failed to connect to database on startup", logger.F("component", "Server"), logger.F("err", err.Error()))
 		// Log warning and continue so that /health can still respond even if DB is down.
 	} else {
 		defer db.Close()
-		log.Println("Successfully connected to the database")
+		logger.Info(context.Background(), "Successfully connected to database", logger.F("component", "Server"))
 	}
 
 	// Repositories
@@ -83,21 +84,45 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
-	// Configure Hardened HTTP Server with Explicit Timeouts
+	// Configure Hardened Public HTTP Server with Explicit Timeouts
+	// ReadTimeout: 15s (allows full body reading)
+	// WriteTimeout: 30s (headroom above the 20s request context timeout)
+	// IdleTimeout: 60s (recycles idle keepalive TCP connections)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Start Server in Background Goroutine
+	// Internal Metrics Server (dedicated listener)
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", metrics.Handler())
+
+	metricsSrv := &http.Server{
+		Addr:              ":" + cfg.MetricsPort,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+
+	// Start Public API Server in Background Goroutine
 	go func() {
-		log.Printf("Server listening on port %s", cfg.Port)
+		logger.Info(context.Background(), "Server listening", logger.F("component", "Server"), logger.F("port", cfg.Port))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server failed: %v", err)
+			logger.Fatal(context.Background(), "Server failed unexpectedly", err, logger.F("component", "Server"))
+		}
+	}()
+
+	// Start Internal Metrics Server in Background Goroutine
+	go func() {
+		logger.Info(context.Background(), "Internal metrics server listening", logger.F("component", "MetricsServer"), logger.F("port", cfg.MetricsPort))
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error(context.Background(), "Metrics server failed unexpectedly", err, logger.F("component", "MetricsServer"))
 		}
 	}()
 
@@ -106,15 +131,18 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server gracefully...")
+	logger.Info(context.Background(), "Shutting down servers gracefully...", logger.F("component", "Server"))
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error(context.Background(), "Public server forced to shutdown", err, logger.F("component", "Server"))
+	}
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error(context.Background(), "Metrics server forced to shutdown", err, logger.F("component", "MetricsServer"))
 	}
 
-	log.Println("Server exiting")
+	logger.Info(context.Background(), "Server exited cleanly", logger.F("component", "Server"))
 }
 

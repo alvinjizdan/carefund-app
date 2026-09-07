@@ -8,6 +8,7 @@ import (
 
 	"carefund-api/internal/database"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/metrics"
 )
 
 type SettlementService interface {
@@ -144,8 +145,10 @@ func (s *settlementService) SettleCampaign(ctx context.Context, campaignID strin
 	})
 
 	if err != nil {
+		metrics.RecordSettlementFailed()
 		return nil, err
 	}
 
+	metrics.RecordSettlementApproved()
 	return finalSettlement, nil
 }

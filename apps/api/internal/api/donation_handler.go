@@ -13,6 +13,7 @@ import (
 
 	"carefund-api/internal/api/middleware"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/logger"
 	"carefund-api/internal/service"
 )
 
@@ -189,6 +190,13 @@ func (h *DonationHandler) createDonationIdempotent(
 
 
 	// PHASE 5: Return the response.
+	logger.Info(r.Context(), "Donation initiated successfully",
+		logger.F("component", "DonationHandler"),
+		logger.F("donation_id", donation.ID),
+		logger.F("payment_id", payment.ID),
+		logger.F("order_id", payment.OrderID),
+		logger.F("amount", donation.Amount),
+	)
 	RespondJSON(w, http.StatusCreated, respObj)
 }
 

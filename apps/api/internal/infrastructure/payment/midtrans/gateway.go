@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"carefund-api/internal/config"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/logger"
+	"carefund-api/internal/metrics"
 
 	"github.com/midtrans/midtrans-go"
 	"github.com/midtrans/midtrans-go/coreapi"
@@ -43,6 +45,23 @@ func NewGateway(cfg *config.Config) *Gateway {
 	}
 }
 
+func classifyError(err error) string {
+	if err == nil {
+		return "success"
+	}
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded") {
+		return "timeout"
+	}
+	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "no such host") || strings.Contains(errStr, "network") {
+		return "network_error"
+	}
+	if strings.Contains(errStr, "412") || strings.Contains(errStr, "400") || strings.Contains(errStr, "deny") || strings.Contains(errStr, "cannot be refunded") || strings.Contains(errStr, "invalid transaction status") {
+		return "rejected"
+	}
+	return "provider_error"
+}
+
 func (g *Gateway) CreatePayment(ctx context.Context, p *domain.Payment, d *domain.Donation, customerEmail string, customerName string) (*domain.PaymentCreationResult, error) {
 	// Map to Midtrans Snap request
 	req := &snap.Request{
@@ -57,9 +76,16 @@ func (g *Gateway) CreatePayment(ctx context.Context, p *domain.Payment, d *domai
 	}
 
 	// Call Midtrans SDK
+	start := time.Now()
 	snapResp, err := g.snapClient.CreateTransaction(req)
+	duration := time.Since(start)
+	metrics.RecordProviderRequest("MIDTRANS", "create_transaction", classifyError(err), duration)
+
 	if err != nil {
-		log.Printf("[Midtrans Error] Failed to create Snap transaction: %v", err)
+		logger.Error(ctx, "Failed to create Snap transaction", err,
+			logger.F("component", "MidtransGateway"),
+			logger.F("order_id", p.OrderID),
+		)
 		return nil, errors.New("failed to initialize payment gateway")
 	}
 
@@ -75,12 +101,19 @@ func (g *Gateway) CreatePayment(ctx context.Context, p *domain.Payment, d *domai
 }
 
 func (g *Gateway) GetPaymentStatus(ctx context.Context, orderID string) (*domain.PaymentStatusResult, error) {
+	start := time.Now()
 	resp, err := g.coreClient.CheckTransaction(orderID)
+	duration := time.Since(start)
+	metrics.RecordProviderRequest("MIDTRANS", "check_transaction", classifyError(err), duration)
+
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return nil, errors.New("transaction not found")
 		}
-		log.Printf("[Midtrans Error] CheckTransaction failed for OrderID %s: %v", orderID, err)
+		logger.Error(ctx, "CheckTransaction failed", err,
+			logger.F("component", "MidtransGateway"),
+			logger.F("order_id", orderID),
+		)
 		return nil, errors.New("failed to retrieve payment status from provider")
 	}
 
@@ -114,10 +147,19 @@ func (g *Gateway) RefundPayment(ctx context.Context, req *domain.RefundRequest) 
 		Reason:    req.Reason,
 	}
 
+	start := time.Now()
 	resp, err := g.coreClient.DirectRefundTransaction(req.OrderID, midtransReq)
+	duration := time.Since(start)
+	metrics.RecordProviderRequest("MIDTRANS", "direct_refund", classifyError(err), duration)
 	if err != nil {
 		errStr := strings.ToLower(err.Error())
-		log.Printf("[Midtrans Error] RefundTransaction failed for OrderID %s, RefundKey %s: %s", req.OrderID, req.IdempotencyKey, err.Message)
+		logger.Warn(ctx, "RefundTransaction provider error",
+			logger.F("component", "MidtransGateway"),
+			logger.F("order_id", req.OrderID),
+			logger.F("refund_id", req.RefundID),
+			logger.F("idempotency_key", req.IdempotencyKey),
+			logger.F("err", err.Message),
+		)
 
 		if strings.Contains(errStr, "412") || strings.Contains(errStr, "400") ||
 			strings.Contains(errStr, "cannot be refunded") || strings.Contains(errStr, "invalid transaction status") ||

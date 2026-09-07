@@ -8,6 +8,7 @@ import (
 
 	"carefund-api/internal/database"
 	"carefund-api/internal/domain"
+	"carefund-api/internal/metrics"
 )
 
 type ProcessRefundRequest struct {
@@ -119,6 +120,8 @@ func (s *refundService) ProcessLocalRefund(ctx context.Context, req ProcessRefun
 	if err != nil {
 		return nil, err
 	}
+
+	metrics.RecordRefundInitiated()
 
 	return finalRefund, nil
 }

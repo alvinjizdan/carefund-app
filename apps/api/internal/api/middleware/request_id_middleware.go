@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"carefund-api/internal/logger"
+
 	"github.com/google/uuid"
 )
 
@@ -25,6 +27,7 @@ func RequestIDAndSecurityHeaders() func(http.Handler) http.Handler {
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 			ctx := context.WithValue(r.Context(), RequestIDKey, reqID)
+			ctx = logger.ContextWithRequestID(ctx, reqID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

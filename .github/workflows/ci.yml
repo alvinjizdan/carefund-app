@@ -1,0 +1,423 @@
+﻿name: Backend CI
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/**'
+      - 'docker-compose.dev.yml'
+  pull_request:
+    branches: [staging]
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/**'
+      - 'docker-compose.dev.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  # -----------------------------------------------------------
+  # 1. Static Analysis, Formatting & Linux Compilation
+  # -----------------------------------------------------------
+  static-and-build:
+    name: Lint, Format & Linux Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.24'
+          check-latest: true
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Verify Go module tidy
+        run: |
+          go mod verify
+
+      - name: Run go vet
+        run: |
+          go vet ./...
+
+      - name: Verify formatting (gofmt)
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following Go files are not formatted according to gofmt:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Compile all packages (native)
+        run: |
+          go build -v ./...
+
+      - name: Compile Linux production binaries (statically linked)
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -ldflags="-s -w" -o bin/server ./cmd/server
+          go build -ldflags="-s -w" -o bin/worker ./cmd/worker
+          go build -ldflags="-s -w" -o bin/migrate ./cmd/migrate
+
+  # -----------------------------------------------------------
+  # 2. Integration Tests & Migration Verification
+  # -----------------------------------------------------------
+  test-and-migrate:
+    name: Unit/Integration Tests & Migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: carefund_ci
+          POSTGRES_PASSWORD: ci_disposable_password_987
+          POSTGRES_DB: carefund-app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U carefund_ci -d carefund-app_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.24'
+          check-latest: true
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Verify PostgreSQL readiness
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 5432; then
+              echo "PostgreSQL port 5432 is reachable"
+              break
+            fi
+            echo "Waiting for postgres..."
+            sleep 1
+          done
+
+      - name: Run database migration verification (000001 -> 000025)
+        env:
+          ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: carefund_ci
+          DB_PASSWORD: ci_disposable_password_987
+          DB_NAME: carefund-app_test
+          DB_SSLMODE: disable
+        run: |
+          # 1. Forward migration from 0 to 25
+          echo "Applying migrations forward..."
+          go run ./cmd/migrate -path=migrations up
+
+          # 2. Inspect active schema version
+          echo "Inspecting active schema version..."
+          go run ./cmd/migrate -path=migrations version
+
+          # 3. Re-run migration up to assert idempotency (no change)
+          echo "Asserting migration idempotency..."
+          go run ./cmd/migrate -path=migrations up
+
+      - name: Run test suite (serialized execution)
+        env:
+          ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: carefund_ci
+          DB_PASSWORD: ci_disposable_password_987
+          DB_NAME: carefund-app_test
+          DB_SSLMODE: disable
+          JWT_SECRET: ci-jwt-secret-testing-key-32bytes
+          MIDTRANS_SERVER_KEY: ci-midtrans-mock-server-key
+          MIDTRANS_CLIENT_KEY: ci-midtrans-mock-client-key
+        run: |
+          go test -v -p 1 -count=1 ./...
+
+  # -----------------------------------------------------------
+  # 3. Race Detector (Closes Windows CGO gap)
+  # -----------------------------------------------------------
+  race-detector:
+    name: Go Race Detection (CGO Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: carefund_ci
+          POSTGRES_PASSWORD: ci_disposable_password_987
+          POSTGRES_DB: carefund-app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U carefund_ci -d carefund-app_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.24'
+          check-latest: true
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Verify C compiler presence
+        run: |
+          gcc --version || (sudo apt-get update && sudo apt-get install -y build-essential)
+
+      - name: Execute test suite with race detector
+        env:
+          CGO_ENABLED: '1'
+          ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: carefund_ci
+          DB_PASSWORD: ci_disposable_password_987
+          DB_NAME: carefund-app_test
+          DB_SSLMODE: disable
+          JWT_SECRET: ci-jwt-secret-testing-key-32bytes
+          MIDTRANS_SERVER_KEY: ci-midtrans-mock-server-key
+          MIDTRANS_CLIENT_KEY: ci-midtrans-mock-client-key
+        run: |
+          # Apply schema first for integration tests
+          go run ./cmd/migrate -path=migrations up
+          # Execute race test across all packages
+          go test -race -v -p 1 -count=1 ./...
+
+  # -----------------------------------------------------------
+  # 4. Docker Build & Container Runtime Verification
+  # -----------------------------------------------------------
+  docker-build-and-test:
+    name: Docker Build & Container Runtime
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: carefund_ci
+          POSTGRES_PASSWORD: ci_disposable_password_987
+          POSTGRES_DB: carefund-app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U carefund_ci -d carefund-app_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build Docker target 'server'
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          target: server
+          tags: carefund-server:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Docker target 'worker'
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          target: worker
+          tags: carefund-worker:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Docker target 'migrate'
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          target: migrate
+          tags: carefund-migrate:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Audit image security & non-root user
+        run: |
+          for IMG in carefund-server:ci carefund-worker:ci carefund-migrate:ci; do
+            echo "Auditing $IMG..."
+            USER_ID=$(docker run --rm --entrypoint id $IMG -u)
+            if [ "$USER_ID" != "10001" ]; then
+              echo "Error: $IMG runs as UID $USER_ID, expected 10001 (appuser)"
+              exit 1
+            fi
+            echo "$IMG successfully verified running as non-root (UID 10001)"
+
+            # Verify absence of compiler toolchains
+            if docker run --rm --entrypoint which $IMG go >/dev/null 2>&1; then
+              echo "Error: $IMG contains Go compiler toolchain"
+              exit 1
+            fi
+
+            # Verify absence of sensitive repository artifacts
+            if docker run --rm --entrypoint ls -d $IMG /app/.git >/dev/null 2>&1; then
+              echo "Error: $IMG contains .git repository metadata"
+              exit 1
+            fi
+            if docker run --rm --entrypoint ls $IMG /app/.env >/dev/null 2>&1; then
+              echo "Error: $IMG contains .env secret files"
+              exit 1
+            fi
+          done
+
+      - name: Run containerized migration
+        run: |
+          # Run migrate container on host network against ephemeral PostgreSQL
+          docker run --rm --network host \
+            -e ENV=test \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=carefund_ci \
+            -e DB_PASSWORD=ci_disposable_password_987 \
+            -e DB_NAME=carefund-app_test \
+            -e DB_SSLMODE=disable \
+            carefund-migrate:ci -path=/app/migrations up
+
+          # Verify version
+          docker run --rm --network host \
+            -e ENV=test \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=carefund_ci \
+            -e DB_PASSWORD=ci_disposable_password_987 \
+            -e DB_NAME=carefund-app_test \
+            -e DB_SSLMODE=disable \
+            carefund-migrate:ci -path=/app/migrations version
+
+      - name: Run server container & test health/readiness
+        run: |
+          # Start server container
+          docker run -d --name test-api --network host \
+            -e ENV=development \
+            -e PORT=8080 \
+            -e METRICS_HOST=0.0.0.0 \
+            -e METRICS_PORT=9090 \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=carefund_ci \
+            -e DB_PASSWORD=ci_disposable_password_987 \
+            -e DB_NAME=carefund-app_test \
+            -e DB_SSLMODE=disable \
+            -e JWT_SECRET=ci-jwt-secret-testing-key-32bytes \
+            -e MIDTRANS_SERVER_KEY=ci-midtrans-mock-server-key \
+            carefund-server:ci
+
+          sleep 3
+
+          # Test /health
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/health)
+          if [ "$HEALTH" != "200" ]; then
+            echo "Expected 200 from /health, got $HEALTH"
+            docker logs test-api
+            exit 1
+          fi
+          echo "/health returned HTTP 200 OK"
+
+          # Test /ready
+          READY=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ready)
+          if [ "$READY" != "200" ]; then
+            echo "Expected 200 from /ready, got $READY"
+            docker logs test-api
+            exit 1
+          fi
+          echo "/ready returned HTTP 200 OK"
+
+          # Graceful shutdown test
+          echo "Sending SIGTERM to API container..."
+          docker stop -t 10 test-api
+          docker rm test-api
+
+      - name: Run worker container & test single-pass mode
+        run: |
+          # Execute single pass (-once)
+          docker run --rm --network host \
+            -e ENV=development \
+            -e WORKER_METRICS_HOST=0.0.0.0 \
+            -e WORKER_METRICS_PORT=9091 \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=carefund_ci \
+            -e DB_PASSWORD=ci_disposable_password_987 \
+            -e DB_NAME=carefund-app_test \
+            -e DB_SSLMODE=disable \
+            -e MIDTRANS_SERVER_KEY=ci-midtrans-mock-server-key \
+            carefund-worker:ci -once
+
+      - name: Validate docker-compose.dev.yml specification
+        run: |
+          docker compose -f docker-compose.dev.yml config
+
+  # -----------------------------------------------------------
+  # 5. Security & Vulnerability Scanning
+  # -----------------------------------------------------------
+  security-audit:
+    name: Security & Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: '1.24'
+          check-latest: true
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Run Govulncheck (Go official vulnerability scanner)
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: 'apps/api/go.mod'
+          work-dir: 'apps/api'
+
+      - name: Run Secret Scan (TruffleHog OSS)
+        uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c # v3.97.4
+        with:
+          base: ""
+          head: ${{ github.ref_name }}
+          extra_args: --only-verified

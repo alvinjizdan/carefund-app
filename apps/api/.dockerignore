@@ -1,0 +1,29 @@
+﻿# Root .dockerignore for CareFund Backend
+.git
+.github
+.vscode
+.idea
+*.log
+*.tmp
+*.exe
+tmp/
+
+# Secrets and Environment Configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Node and Frontend (not part of Go backend container)
+node_modules/
+apps/web/
+
+# Test artifacts and coverage
+*.out
+*.test
+coverage/
+dist/
+build/

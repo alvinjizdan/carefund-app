@@ -1,0 +1,97 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: carefund-postgres-dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: carefund-app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d carefund-app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: migrate
+    container_name: carefund-migrate-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENV: development
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: carefund-app
+      DB_SSLMODE: disable
+    command: ["-path=/app/migrations", "up"]
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: server
+    container_name: carefund-api-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      ENV: development
+      PORT: "8080"
+      METRICS_HOST: "0.0.0.0"
+      METRICS_PORT: "9090"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: carefund-app
+      DB_SSLMODE: disable
+      JWT_SECRET: "local-dev-jwt-secret-key-32bytes-min"
+      MIDTRANS_SERVER_KEY: "SB-Mid-server-mock-key"
+      MIDTRANS_CLIENT_KEY: "SB-Mid-client-mock-key"
+      MIDTRANS_ENVIRONMENT: "sandbox"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: worker
+    container_name: carefund-worker-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      ENV: development
+      WORKER_METRICS_HOST: "0.0.0.0"
+      WORKER_METRICS_PORT: "9091"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: carefund-app
+      DB_SSLMODE: disable
+      MIDTRANS_SERVER_KEY: "SB-Mid-server-mock-key"
+      MIDTRANS_CLIENT_KEY: "SB-Mid-client-mock-key"
+      MIDTRANS_ENVIRONMENT: "sandbox"
+    ports:
+      - "9091:9091"
+
+volumes:
+  pgdata:

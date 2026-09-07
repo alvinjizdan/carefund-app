@@ -19,9 +19,25 @@ func Connect(cfg *config.Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(15 * time.Minute)
+	maxOpen := cfg.DBMaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	maxIdle := cfg.DBMaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = 10
+	}
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	connMaxLifetime := cfg.DBConnMaxLifetime
+	if connMaxLifetime <= 0 {
+		connMaxLifetime = 15 * time.Minute
+	}
+
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(connMaxLifetime)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {

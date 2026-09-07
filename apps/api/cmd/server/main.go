@@ -102,7 +102,7 @@ func main() {
 	metricsMux.Handle("/metrics", metrics.Handler())
 
 	metricsSrv := &http.Server{
-		Addr:              ":" + cfg.MetricsPort,
+		Addr:              cfg.MetricsAddress(),
 		Handler:           metricsMux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -120,7 +120,7 @@ func main() {
 
 	// Start Internal Metrics Server in Background Goroutine
 	go func() {
-		logger.Info(context.Background(), "Internal metrics server listening", logger.F("component", "MetricsServer"), logger.F("port", cfg.MetricsPort))
+		logger.Info(context.Background(), "Internal metrics server listening", logger.F("component", "MetricsServer"), logger.F("addr", cfg.MetricsAddress()))
 		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error(context.Background(), "Metrics server failed unexpectedly", err, logger.F("component", "MetricsServer"))
 		}

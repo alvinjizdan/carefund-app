@@ -158,7 +158,7 @@ func main() {
 	metricsMux.Handle("/metrics", metrics.Handler())
 
 	metricsSrv := &http.Server{
-		Addr:              ":" + cfg.WorkerMetricsPort,
+		Addr:              cfg.WorkerMetricsAddress(),
 		Handler:           metricsMux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -169,7 +169,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info(ctx, "Worker metrics server listening", logger.F("component", "WorkerMetricsServer"), logger.F("port", cfg.WorkerMetricsPort))
+		logger.Info(ctx, "Worker metrics server listening", logger.F("component", "WorkerMetricsServer"), logger.F("addr", cfg.WorkerMetricsAddress()))
 		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error(ctx, "Worker metrics server failed unexpectedly", err, logger.F("component", "WorkerMetricsServer"))
 		}

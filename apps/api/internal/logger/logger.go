@@ -2,12 +2,14 @@ package logger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Field struct {
@@ -80,7 +82,33 @@ func SetOutput(w io.Writer) {
 	defaultLogger.SetOutput(w)
 }
 
+func formatJSON(ctx context.Context, level, msg string, err error, fields []Field) string {
+	payload := make(map[string]any, len(fields)+5)
+	payload["time"] = time.Now().UTC().Format(time.RFC3339Nano)
+	payload["level"] = level
+	if reqID := GetRequestID(ctx); reqID != "" {
+		payload["request_id"] = reqID
+	}
+	payload["message"] = msg
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	for _, f := range fields {
+		payload[f.Key] = sanitizeValue(f.Key, f.Value)
+	}
+	b, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return fmt.Sprintf(`{"time":%q,"level":%q,"message":%q,"marshal_error":%q}`,
+			time.Now().UTC().Format(time.RFC3339Nano), level, msg, marshalErr.Error())
+	}
+	return string(b)
+}
+
 func formatLog(ctx context.Context, level, msg string, err error, fields []Field) string {
+	if strings.ToLower(os.Getenv("LOG_FORMAT")) == "json" {
+		return formatJSON(ctx, level, msg, err, fields)
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("[")
@@ -132,27 +160,29 @@ func formatLog(ctx context.Context, level, msg string, err error, fields []Field
 	return sb.String()
 }
 
-func Info(ctx context.Context, msg string, fields ...Field) {
+func writeLog(entry string) {
 	mu.Lock()
 	defer mu.Unlock()
-	defaultLogger.Println(formatLog(ctx, "INFO", msg, nil, fields))
+	if strings.ToLower(os.Getenv("LOG_FORMAT")) == "json" {
+		fmt.Fprintln(defaultLogger.Writer(), entry)
+	} else {
+		defaultLogger.Println(entry)
+	}
+}
+
+func Info(ctx context.Context, msg string, fields ...Field) {
+	writeLog(formatLog(ctx, "INFO", msg, nil, fields))
 }
 
 func Warn(ctx context.Context, msg string, fields ...Field) {
-	mu.Lock()
-	defer mu.Unlock()
-	defaultLogger.Println(formatLog(ctx, "WARN", msg, nil, fields))
+	writeLog(formatLog(ctx, "WARN", msg, nil, fields))
 }
 
 func Error(ctx context.Context, msg string, err error, fields ...Field) {
-	mu.Lock()
-	defer mu.Unlock()
-	defaultLogger.Println(formatLog(ctx, "ERROR", msg, err, fields))
+	writeLog(formatLog(ctx, "ERROR", msg, err, fields))
 }
 
 func Fatal(ctx context.Context, msg string, err error, fields ...Field) {
-	mu.Lock()
-	defer mu.Unlock()
-	defaultLogger.Println(formatLog(ctx, "FATAL", msg, err, fields))
+	writeLog(formatLog(ctx, "FATAL", msg, err, fields))
 	os.Exit(1)
 }

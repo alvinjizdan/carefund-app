@@ -33,6 +33,7 @@ func main() {
 		logger.Fatal(context.Background(), "Failed to connect to database", err, logger.F("component", "Worker"))
 	}
 	defer db.Close()
+	metrics.RegisterDBStats(db.DB)
 
 	// Dependency initialization - fail-fast on any missing component
 	txManager := database.NewTransactionManager(db)

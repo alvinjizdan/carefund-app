@@ -163,6 +163,9 @@ func Load() (*Config, error) {
 		if cfg.CORSAllowedOrigins == "" || cfg.CORSAllowedOrigins == "http://localhost:3000" {
 			return nil, errors.New("CORS_ALLOWED_ORIGINS is required and cannot default to localhost in production")
 		}
+		if cfg.DBSSLMode == "disable" || cfg.DBSSLMode == "" {
+			return nil, errors.New("DB_SSLMODE cannot be 'disable' in production; encrypted PostgreSQL transport is required (e.g. require, verify-ca, verify-full)")
+		}
 	}
 
 	return cfg, nil

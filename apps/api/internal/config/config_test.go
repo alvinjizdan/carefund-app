@@ -47,6 +47,7 @@ func TestLoad_ProductionRequiresDBPassword(t *testing.T) {
 	os.Setenv("JWT_SECRET", "prod-secret")
 	os.Setenv("MIDTRANS_SERVER_KEY", "prod-midtrans-key")
 	os.Setenv("CORS_ALLOWED_ORIGINS", "https://carefund.org")
+	os.Setenv("DB_SSLMODE", "require")
 
 	// 1. Missing DB_PASSWORD in production -> Must fail fast
 	_, err := config.Load()
@@ -70,6 +71,103 @@ func TestLoad_ProductionRequiresDBPassword(t *testing.T) {
 	if cfg.DBPassword != "super-secret-production-pw" {
 		t.Fatalf("expected DBPassword 'super-secret-production-pw', got %s", cfg.DBPassword)
 	}
+}
+
+func TestLoad_ProductionRequiresEncryptedDBSSLMode(t *testing.T) {
+	setupProd := func(t *testing.T) func() {
+		restore := clearEnv(t)
+		os.Setenv("ENV", "production")
+		os.Setenv("JWT_SECRET", "prod-secret-32bytes-for-testing")
+		os.Setenv("MIDTRANS_SERVER_KEY", "prod-midtrans-key")
+		os.Setenv("CORS_ALLOWED_ORIGINS", "https://carefund.org")
+		os.Setenv("DB_PASSWORD", "prod-secure-db-password")
+		return restore
+	}
+
+	t.Run("production default (unset) DB_SSLMODE fails fast", func(t *testing.T) {
+		restore := setupProd(t)
+		defer restore()
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_SSLMODE cannot be 'disable' in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("production explicit DB_SSLMODE=disable fails fast", func(t *testing.T) {
+		restore := setupProd(t)
+		defer restore()
+
+		os.Setenv("DB_SSLMODE", "disable")
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is disable in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_SSLMODE cannot be 'disable' in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("production valid encrypted modes succeed", func(t *testing.T) {
+		for _, mode := range []string{"require", "verify-ca", "verify-full"} {
+			restore := setupProd(t)
+			os.Setenv("DB_SSLMODE", mode)
+
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("expected mode %q to succeed in production, got: %v", mode, err)
+			}
+			if cfg.DBSSLMode != mode {
+				t.Fatalf("expected DBSSLMode %q, got %q", mode, cfg.DBSSLMode)
+			}
+			restore()
+		}
+	})
+
+	t.Run("development permits default and explicit disable", func(t *testing.T) {
+		restore := clearEnv(t)
+		defer restore()
+
+		os.Setenv("ENV", "development")
+		os.Setenv("JWT_SECRET", "dev-secret")
+		os.Setenv("MIDTRANS_SERVER_KEY", "dev-key")
+
+		// Unset -> defaults to disable
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("unexpected error in development with default SSLMODE: %v", err)
+		}
+		if cfg.DBSSLMode != "disable" {
+			t.Fatalf("expected default 'disable', got %q", cfg.DBSSLMode)
+		}
+
+		// Explicit disable
+		os.Setenv("DB_SSLMODE", "disable")
+		cfg, err = config.Load()
+		if err != nil {
+			t.Fatalf("unexpected error in development with explicit disable: %v", err)
+		}
+		if cfg.DBSSLMode != "disable" {
+			t.Fatalf("expected 'disable', got %q", cfg.DBSSLMode)
+		}
+	})
+
+	t.Run("test environment permits disable", func(t *testing.T) {
+		restore := clearEnv(t)
+		defer restore()
+
+		os.Setenv("ENV", "test")
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("unexpected error in test env: %v", err)
+		}
+		if cfg.DBSSLMode != "disable" {
+			t.Fatalf("expected 'disable', got %q", cfg.DBSSLMode)
+		}
+	})
 }
 
 func TestLoad_DevelopmentFallbackDBPassword(t *testing.T) {

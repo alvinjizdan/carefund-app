@@ -2,9 +2,11 @@ package metrics
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"carefund-api/internal/logger"
@@ -478,4 +480,88 @@ func NormalizeRoute(path string) string {
 	}
 
 	return "other"
+}
+
+var (
+	dbStatsMu               sync.Mutex
+	currentDBStatsCollector prometheus.Collector
+)
+
+type dbStatsCollector struct {
+	db *sql.DB
+
+	openConnsDesc    *prometheus.Desc
+	inUseConnsDesc   *prometheus.Desc
+	idleConnsDesc    *prometheus.Desc
+	waitCountDesc    *prometheus.Desc
+	waitDurationDesc *prometheus.Desc
+}
+
+func newDBStatsCollector(db *sql.DB) *dbStatsCollector {
+	return &dbStatsCollector{
+		db: db,
+		openConnsDesc: prometheus.NewDesc(
+			"db_open_connections",
+			"Current number of established PostgreSQL connections both in use and idle.",
+			nil, nil,
+		),
+		inUseConnsDesc: prometheus.NewDesc(
+			"db_in_use_connections",
+			"Current number of PostgreSQL connections in use.",
+			nil, nil,
+		),
+		idleConnsDesc: prometheus.NewDesc(
+			"db_idle_connections",
+			"Current number of idle PostgreSQL connections in the pool.",
+			nil, nil,
+		),
+		waitCountDesc: prometheus.NewDesc(
+			"db_wait_count_total",
+			"Total number of times a PostgreSQL connection had to be waited for.",
+			nil, nil,
+		),
+		waitDurationDesc: prometheus.NewDesc(
+			"db_wait_duration_seconds_total",
+			"Total time blocked waiting for a new PostgreSQL connection in seconds.",
+			nil, nil,
+		),
+	}
+}
+
+func (c *dbStatsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.openConnsDesc
+	ch <- c.inUseConnsDesc
+	ch <- c.idleConnsDesc
+	ch <- c.waitCountDesc
+	ch <- c.waitDurationDesc
+}
+
+func (c *dbStatsCollector) Collect(ch chan<- prometheus.Metric) {
+	if c.db == nil {
+		return
+	}
+	stats := c.db.Stats()
+	ch <- prometheus.MustNewConstMetric(c.openConnsDesc, prometheus.GaugeValue, float64(stats.OpenConnections))
+	ch <- prometheus.MustNewConstMetric(c.inUseConnsDesc, prometheus.GaugeValue, float64(stats.InUse))
+	ch <- prometheus.MustNewConstMetric(c.idleConnsDesc, prometheus.GaugeValue, float64(stats.Idle))
+	ch <- prometheus.MustNewConstMetric(c.waitCountDesc, prometheus.CounterValue, float64(stats.WaitCount))
+	ch <- prometheus.MustNewConstMetric(c.waitDurationDesc, prometheus.CounterValue, stats.WaitDuration.Seconds())
+}
+
+// RegisterDBStats registers a prometheus collector for database/sql connection pool statistics.
+// If a collector was previously registered, it is safely unregistered and replaced.
+func RegisterDBStats(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	dbStatsMu.Lock()
+	defer dbStatsMu.Unlock()
+
+	if currentDBStatsCollector != nil {
+		registry.Unregister(currentDBStatsCollector)
+	}
+
+	collector := newDBStatsCollector(db)
+	currentDBStatsCollector = collector
+	_ = registry.Register(collector)
 }

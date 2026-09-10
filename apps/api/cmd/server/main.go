@@ -31,6 +31,7 @@ func main() {
 		// Log warning and continue so that /health can still respond even if DB is down.
 	} else {
 		defer db.Close()
+		metrics.RegisterDBStats(db.DB)
 		logger.Info(context.Background(), "Successfully connected to database", logger.F("component", "Server"))
 	}
 

@@ -1,4 +1,4 @@
-﻿services:
+services:
   postgres:
     image: postgres:16-alpine
     container_name: carefund-postgres-dev
@@ -87,6 +87,7 @@
       DB_PASSWORD: password123
       DB_NAME: carefund-app
       DB_SSLMODE: disable
+      JWT_SECRET: "local-dev-jwt-secret-key-32bytes-min"
       MIDTRANS_SERVER_KEY: "SB-Mid-server-mock-key"
       MIDTRANS_CLIENT_KEY: "SB-Mid-client-mock-key"
       MIDTRANS_ENVIRONMENT: "sandbox"

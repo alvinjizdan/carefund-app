@@ -3,6 +3,7 @@ package metrics_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"carefund-api/internal/api/middleware"
 	"carefund-api/internal/logger"
 	"carefund-api/internal/metrics"
+
+	_ "github.com/lib/pq"
 )
 
 func TestHTTPMetricsAndRouteNormalization(t *testing.T) {
@@ -275,4 +278,36 @@ func TestWorkerHeartbeatVsProgressAndScrapeEndpoint(t *testing.T) {
 	if !strings.Contains(bodyD, `worker_start_total{worker_type="outbox"}`) {
 		t.Errorf("expected worker_start_total in /metrics")
 	}
+}
+
+func TestDBStatsMetrics(t *testing.T) {
+	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	if err != nil {
+		t.Fatalf("failed to open dummy db: %v", err)
+	}
+	defer db.Close()
+
+	metrics.RegisterDBStats(db)
+
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+
+	expectedMetrics := []string{
+		"db_open_connections",
+		"db_in_use_connections",
+		"db_idle_connections",
+		"db_wait_count_total",
+		"db_wait_duration_seconds_total",
+	}
+
+	for _, metricName := range expectedMetrics {
+		if !strings.Contains(body, metricName) {
+			t.Errorf("expected %s in /metrics, got:\n%s", metricName, body)
+		}
+	}
+
+	// Verify re-registration and nil handling are safe and do not panic
+	metrics.RegisterDBStats(db)
+	metrics.RegisterDBStats(nil)
 }

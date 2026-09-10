@@ -34,7 +34,10 @@ func TestSettlementEligibilityDomain(t *testing.T) {
 }
 
 func setupSettlementTestDB(t *testing.T) (*database.DB, domain.UserRepository, domain.CampaignRepository, domain.DonationRepository, domain.PaymentRepository, domain.SettlementRepository, domain.SettlementItemRepository, domain.CategoryRepository, domain.OutboxEventRepository, database.TransactionManager) {
-	cfg := &config.Config{DBHost: "localhost", DBPort: "5432", DBUser: "postgres", DBPassword: "234djisamSOE", DBName: "carefund-app_test", DBSSLMode: "disable"}
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
+	}
 	db, err := database.Connect(cfg)
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)

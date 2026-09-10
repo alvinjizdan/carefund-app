@@ -293,11 +293,11 @@ jobs:
             fi
 
             # Verify absence of sensitive repository artifacts
-            if docker run --rm --entrypoint ls -d $IMG /app/.git >/dev/null 2>&1; then
+            if docker run --rm --entrypoint test $IMG -e /app/.git; then
               echo "Error: $IMG contains .git repository metadata"
               exit 1
             fi
-            if docker run --rm --entrypoint ls $IMG /app/.env >/dev/null 2>&1; then
+            if docker run --rm --entrypoint test $IMG -e /app/.env; then
               echo "Error: $IMG contains .env secret files"
               exit 1
             fi

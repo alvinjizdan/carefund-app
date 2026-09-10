@@ -15,7 +15,10 @@ import (
 )
 
 func setupRefundTestDB(t *testing.T) (*database.DB, service.RefundService, domain.PaymentRepository, domain.DonationRepository, domain.RefundRepository, domain.OutboxEventRepository) {
-	cfg := &config.Config{DBHost: "localhost", DBPort: "5432", DBUser: "postgres", DBPassword: "234djisamSOE", DBName: "carefund-app_test", DBSSLMode: "disable"}
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
+	}
 	db, err := database.Connect(cfg)
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)

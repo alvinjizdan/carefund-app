@@ -21,14 +21,9 @@ import (
 )
 
 func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService) {
-	cfg := &config.Config{
-		Env:        "test",
-		DBHost:     "localhost",
-		DBPort:     "5432",
-		DBUser:     "postgres",
-		DBPassword: "234djisamSOE",
-		DBName:     "carefund-app_test",
-		DBSSLMode:  "disable",
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
 	}
 
 	db, err := database.Connect(cfg)

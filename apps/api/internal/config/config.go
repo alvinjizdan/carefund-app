@@ -168,6 +168,24 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// NewTestConfig loads configuration specifically for integration and unit testing.
+// It prioritizes environment variables provided by the test runner (DB_HOST, DB_PORT,
+// DB_USER, DB_PASSWORD, DB_NAME, DB_SSLMODE), defaults DB_NAME to "carefund-app_test"
+// if not explicitly set, and permits development fallbacks when running locally.
+func NewTestConfig() (*Config, error) {
+	if os.Getenv("ENV") == "" {
+		_ = os.Setenv("ENV", "test")
+	}
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv("DB_NAME") == "" {
+		cfg.DBName = "carefund-app_test"
+	}
+	return cfg, nil
+}
+
 // MetricsAddress returns the network listener address for the public API metrics server.
 func (c *Config) MetricsAddress() string {
 	if c.MetricsHost == "" {

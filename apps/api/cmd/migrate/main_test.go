@@ -52,18 +52,13 @@ func TestRunMigration_InvalidDBConnection(t *testing.T) {
 func TestRunMigration_UnsupportedCommand(t *testing.T) {
 	ctx := context.Background()
 
-	cfg := &config.Config{
-		Env:        "test",
-		DBHost:     "localhost",
-		DBPort:     "5432",
-		DBUser:     "postgres",
-		DBPassword: "234djisamSOE",
-		DBName:     "carefund-app_test",
-		DBSSLMode:  "disable",
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
 	}
 
 	// Unsupported command: "drop", "reset", "foo"
-	err := migratecmd.RunMigration(ctx, cfg, "migrations", "unknown_cmd")
+	err = migratecmd.RunMigration(ctx, cfg, "migrations", "unknown_cmd")
 	if err == nil {
 		t.Fatal("expected error for unsupported command, got nil")
 	}
@@ -84,18 +79,13 @@ func TestRunMigration_UnsupportedCommand(t *testing.T) {
 func TestRunMigration_MissingMigrationsDir(t *testing.T) {
 	ctx := context.Background()
 
-	cfg := &config.Config{
-		Env:        "test",
-		DBHost:     "localhost",
-		DBPort:     "5432",
-		DBUser:     "postgres",
-		DBPassword: "234djisamSOE",
-		DBName:     "carefund-app_test",
-		DBSSLMode:  "disable",
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
 	}
 
 	nonExistentDir := filepath.Join(os.TempDir(), "non_existent_migrations_dir_12345")
-	err := migratecmd.RunMigration(ctx, cfg, nonExistentDir, "up")
+	err = migratecmd.RunMigration(ctx, cfg, nonExistentDir, "up")
 	if err == nil {
 		t.Fatal("expected error for missing migrations directory, got nil")
 	}

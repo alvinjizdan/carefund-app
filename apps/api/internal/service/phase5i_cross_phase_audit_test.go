@@ -32,15 +32,11 @@ func setupAuditEnv(t *testing.T) (
 	service.RefundService,
 	service.SettlementService,
 ) {
-	cfg := &config.Config{
-		DBHost:            "localhost",
-		DBPort:            "5432",
-		DBUser:            "postgres",
-		DBPassword:        "234djisamSOE",
-		DBName:            "carefund-app_test",
-		DBSSLMode:         "disable",
-		PaymentPendingTTL: 45 * time.Minute,
+	cfg, err := config.NewTestConfig()
+	if err != nil {
+		t.Fatalf("failed to load test config: %v", err)
 	}
+	cfg.PaymentPendingTTL = 45 * time.Minute
 	db, err := database.Connect(cfg)
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)

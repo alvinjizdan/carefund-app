@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq"
 	"carefund-api/internal/config"
+	_ "github.com/lib/pq"
 )
 
 type DB struct {

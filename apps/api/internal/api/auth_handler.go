@@ -11,10 +11,10 @@ import (
 )
 
 type AuthHandler struct {
-	userSvc     service.UserService
-	authSvc     service.AuthService
-	rtRepo      domain.RefreshTokenRepository
-	roleRepo    domain.RoleRepository
+	userSvc  service.UserService
+	authSvc  service.AuthService
+	rtRepo   domain.RefreshTokenRepository
+	roleRepo domain.RoleRepository
 }
 
 func NewAuthHandler(userSvc service.UserService, authSvc service.AuthService, rtRepo domain.RefreshTokenRepository, roleRepo domain.RoleRepository) *AuthHandler {
@@ -115,7 +115,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 				"email": user.Email,
 				"roles": roles,
 			},
-			"access_token": accessToken,
+			"access_token":  accessToken,
 			"refresh_token": rawRefresh,
 		},
 	})
@@ -131,7 +131,6 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	if req.RefreshToken == "" {
 		RespondError(w, r, domain.ErrInvalidInput)
 		return
@@ -146,7 +145,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !rt.IsValid() {
-		// If revoked or expired, we might want to also revoke all other tokens for safety, 
+		// If revoked or expired, we might want to also revoke all other tokens for safety,
 		// but simple revocation check is fine for now
 		RespondError(w, r, domain.ErrUnauthorized)
 		return
@@ -163,7 +162,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, r, domain.ErrInternalError)
 		return
 	}
-	
+
 	roleNames := make([]string, len(roles))
 	for i, role := range roles {
 		roleNames[i] = role.Name
@@ -198,7 +197,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	RespondJSON(w, http.StatusOK, SuccessResponse{
 		Data: map[string]interface{}{
-			"access_token": accessToken,
+			"access_token":  accessToken,
 			"refresh_token": newRawRefresh,
 		},
 	})
@@ -207,7 +206,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	// The client might provide the refresh token to revoke it, or we revoke all based on the authenticated user.
 	// We'll revoke all for the authenticated user, or expect the refresh_token in body.
-	
+
 	authUser, ok := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)
 	if ok && authUser != nil {
 		// Logged in user revokes all their refresh tokens

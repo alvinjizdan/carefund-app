@@ -29,7 +29,6 @@ func NewRouter(
 	donHandler := NewDonationHandler(donationSvc, idempotencyRepo)
 	webhookHandler := NewWebhookHandler(webhookSvc, cfg)
 
-
 	// Auth Middleware
 	authenticate := middleware.Auth(authSvc)
 	requireAdmin := middleware.RequireRole("ADMIN")
@@ -72,7 +71,6 @@ func NewRouter(
 		generalLimiter := middleware.NewRateLimiter(rate.Limit(60.0/60.0), 60)
 		generalRateLimit = middleware.RateLimit(generalLimiter, ipExtractor)
 	}
-
 
 	// Webhook Route
 	mux.Handle("POST /api/v1/webhooks/midtrans", webhookRateLimit(http.HandlerFunc(webhookHandler.MidtransNotification)))
@@ -119,4 +117,3 @@ func NewRouter(
 
 	return handler
 }
-

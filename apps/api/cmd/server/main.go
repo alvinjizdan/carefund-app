@@ -54,7 +54,6 @@ func main() {
 	// Router
 	handler := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, cfg)
 
-
 	// Custom ServeMux for Health & Readiness (or registered directly in router)
 	mux := http.NewServeMux()
 	mux.Handle("/", handler)
@@ -145,4 +144,3 @@ func main() {
 
 	logger.Info(context.Background(), "Server exited cleanly", logger.F("component", "Server"))
 }
-

@@ -54,24 +54,24 @@ func (p *Payment) IsValidTransition(nextState string) bool {
 	switch p.Status {
 	case PaymentStatusPending:
 		// from pending it can be authorized, captured, failed, expired, cancelled
-		return nextState == PaymentStatusAuthorized || 
-		       nextState == PaymentStatusCaptured || 
-		       nextState == PaymentStatusFailed || 
-		       nextState == PaymentStatusExpired || 
-		       nextState == PaymentStatusCancelled
+		return nextState == PaymentStatusAuthorized ||
+			nextState == PaymentStatusCaptured ||
+			nextState == PaymentStatusFailed ||
+			nextState == PaymentStatusExpired ||
+			nextState == PaymentStatusCancelled
 	case PaymentStatusAuthorized:
-		return nextState == PaymentStatusCaptured || 
-		       nextState == PaymentStatusFailed || 
-		       nextState == PaymentStatusCancelled
+		return nextState == PaymentStatusCaptured ||
+			nextState == PaymentStatusFailed ||
+			nextState == PaymentStatusCancelled
 	case PaymentStatusCaptured:
 		// Funds captured, next is settled or refunded
-		return nextState == PaymentStatusSettled || 
-		       nextState == PaymentStatusRefunded || 
-		       nextState == PaymentStatusPartiallyRefunded
+		return nextState == PaymentStatusSettled ||
+			nextState == PaymentStatusRefunded ||
+			nextState == PaymentStatusPartiallyRefunded
 	case PaymentStatusSettled:
 		// Already settled. It can be refunded.
-		return nextState == PaymentStatusRefunded || 
-		       nextState == PaymentStatusPartiallyRefunded
+		return nextState == PaymentStatusRefunded ||
+			nextState == PaymentStatusPartiallyRefunded
 	case PaymentStatusPartiallyRefunded:
 		// Can progress to fully refunded
 		return nextState == PaymentStatusRefunded
@@ -115,10 +115,10 @@ const (
 	PaymentEventProcessingStatusProcessed = "PROCESSED"
 	PaymentEventProcessingStatusRejected  = "REJECTED"
 
-	RejectionReasonInvalidStateTransition  = "INVALID_STATE_TRANSITION"
-	RejectionReasonAmountMismatch          = "AMOUNT_MISMATCH"
-	RejectionReasonPaymentNotFound         = "PAYMENT_NOT_FOUND"
-	RejectionReasonInvalidEvent            = "INVALID_EVENT"
+	RejectionReasonInvalidStateTransition    = "INVALID_STATE_TRANSITION"
+	RejectionReasonAmountMismatch            = "AMOUNT_MISMATCH"
+	RejectionReasonPaymentNotFound           = "PAYMENT_NOT_FOUND"
+	RejectionReasonInvalidEvent              = "INVALID_EVENT"
 	RejectionReasonUnsupportedProviderStatus = "UNSUPPORTED_PROVIDER_STATUS"
 )
 

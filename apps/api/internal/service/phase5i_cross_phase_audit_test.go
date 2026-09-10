@@ -233,14 +233,14 @@ func TestPhase5IAll27Scenarios(t *testing.T) {
 
 		idemKey := "idem_sc4_" + uuid.New().String()[:8]
 		notif := &domain.WebhookNotification{
-			Provider:        "MIDTRANS",
-			EventSource:     "WEBHOOK",
-			OrderID:         p.OrderID,
-			GrossAmount:     50000,
-			ProviderStatus:  "capture",
-			FraudStatus:     "accept",
-			RawPayload:      `{}`,
-			IdempotencyKey:  idemKey,
+			Provider:       "MIDTRANS",
+			EventSource:    "WEBHOOK",
+			OrderID:        p.OrderID,
+			GrossAmount:    50000,
+			ProviderStatus: "capture",
+			FraudStatus:    "accept",
+			RawPayload:     `{}`,
+			IdempotencyKey: idemKey,
 		}
 
 		err1 := webhookSvc.ProcessNotification(ctx, notif)

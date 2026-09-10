@@ -1,4 +1,4 @@
-﻿# ==========================================
+# ==========================================
 # CareFund Backend Multi-Target Dockerfile
 # Multi-stage, minimal runtime, non-root user
 # ==========================================
@@ -6,7 +6,7 @@
 # ------------------------------------------
 # Stage 1: Build Stage (Golang Compiler)
 # ------------------------------------------
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 

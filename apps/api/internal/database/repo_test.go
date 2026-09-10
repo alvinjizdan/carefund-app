@@ -228,7 +228,7 @@ func TestDonationAndPaymentRepository(t *testing.T) {
 	don2 := &domain.Donation{CampaignID: camp.ID, Amount: 1, Status: "PENDING"}
 	_ = donRepo.Create(ctx, don2)
 	dupPayment.DonationID = don2.ID
-	
+
 	err = payRepo.Create(ctx, dupPayment)
 	if err != domain.ErrDuplicate {
 		t.Errorf("expected ErrDuplicate for order_id, got %v", err)
@@ -269,7 +269,7 @@ func TestTransactionRollback(t *testing.T) {
 			Name:         "Duplicate",
 			IsActive:     true,
 		})
-		
+
 		// We expect this to fail, returning the error causes rollback
 		return err
 	})

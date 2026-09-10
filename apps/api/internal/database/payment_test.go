@@ -47,7 +47,7 @@ func TestPaymentConstraints(t *testing.T) {
 	if err := donRepo.Create(ctx, d1); err != nil {
 		t.Fatalf("failed to create donation 1: %v", err)
 	}
-	
+
 	p1.DonationID = d1.ID
 	if err := payRepo.Create(ctx, p1); err != nil {
 		t.Fatalf("failed to create first payment: %v", err)
@@ -108,11 +108,11 @@ func TestPaymentReconciliationBoundary(t *testing.T) {
 	}
 
 	// 1. age = 44m59s
-	p1 := createPayment("BOUND-1", 44*time.Minute + 59*time.Second)
+	p1 := createPayment("BOUND-1", 44*time.Minute+59*time.Second)
 	// 2. age = exactly 45m
 	p2 := createPayment("BOUND-2", 45*time.Minute)
 	// 3. age = 45m01s
-	p3 := createPayment("BOUND-3", 45*time.Minute + 1*time.Second)
+	p3 := createPayment("BOUND-3", 45*time.Minute+1*time.Second)
 
 	ttl := 45 * time.Minute
 	cutoffTime := time.Now().Add(-ttl)
@@ -124,9 +124,15 @@ func TestPaymentReconciliationBoundary(t *testing.T) {
 
 	foundP1, foundP2, foundP3 := false, false, false
 	for _, p := range stalePayments {
-		if p.ID == p1.ID { foundP1 = true }
-		if p.ID == p2.ID { foundP2 = true }
-		if p.ID == p3.ID { foundP3 = true }
+		if p.ID == p1.ID {
+			foundP1 = true
+		}
+		if p.ID == p2.ID {
+			foundP2 = true
+		}
+		if p.ID == p3.ID {
+			foundP3 = true
+		}
 	}
 
 	if foundP1 {

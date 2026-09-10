@@ -219,7 +219,7 @@ func TestFinancialAnomalySignalsAndSecurity(t *testing.T) {
 		"eyJhbGci",
 		"snap-token",
 		"CF-ANOMALY-001", // no order IDs in labels
-		"evt-999",         // no event IDs in labels
+		"evt-999",        // no event IDs in labels
 	}
 	for _, forbidden := range forbiddenSubstrings {
 		if strings.Contains(metricsBody, forbidden) {

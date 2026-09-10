@@ -210,7 +210,6 @@ func (s *donationService) CreateDonationIdempotent(
 	return d, p, res, nil
 }
 
-
 func (s *donationService) GetDonation(ctx context.Context, id string) (*domain.Donation, error) {
 	return s.donationRepo.FindByID(ctx, id)
 }

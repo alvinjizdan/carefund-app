@@ -1,8 +1,8 @@
 package domain_test
 
 import (
-	"testing"
 	"carefund-api/internal/domain"
+	"testing"
 )
 
 func TestDonationValidation(t *testing.T) {
@@ -24,12 +24,12 @@ func TestDonationValidation(t *testing.T) {
 
 func TestPaymentStateMachine(t *testing.T) {
 	p := &domain.Payment{Status: domain.PaymentStatusPending}
-	
+
 	// Valid transitions
 	if !p.IsValidTransition(domain.PaymentStatusCaptured) {
 		t.Errorf("expected PENDING -> CAPTURED to be valid")
 	}
-	
+
 	// Invalid transition
 	if p.IsValidTransition(domain.PaymentStatusSettled) {
 		t.Errorf("expected PENDING -> SETTLED to be invalid directly")

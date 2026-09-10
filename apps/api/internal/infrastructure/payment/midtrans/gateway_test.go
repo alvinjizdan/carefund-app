@@ -12,10 +12,10 @@ import (
 
 func TestMockGateway(t *testing.T) {
 	mock := midtrans.NewMockPaymentGateway()
-	
+
 	p := &domain.Payment{OrderID: "ORDER-123", GrossAmount: 50000}
 	d := &domain.Donation{Amount: 50000}
-	
+
 	res, err := mock.CreatePayment(context.Background(), p, d, "test@test.com", "Tester")
 	if err != nil {
 		t.Fatalf("expected success from mock, got %v", err)
@@ -38,10 +38,10 @@ func TestMockGateway(t *testing.T) {
 func TestMidtransGatewayArchitecture(t *testing.T) {
 	// Simple init test, do not execute real network call
 	cfg := &config.Config{
-		MidtransServerKey: "test-server-key",
+		MidtransServerKey:   "test-server-key",
 		MidtransEnvironment: "sandbox",
 	}
-	
+
 	gw := midtrans.NewGateway(cfg)
 	if gw == nil {
 		t.Fatalf("expected gateway to initialize")

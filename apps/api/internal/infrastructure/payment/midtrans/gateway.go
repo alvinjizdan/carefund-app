@@ -94,7 +94,7 @@ func (g *Gateway) CreatePayment(ctx context.Context, p *domain.Payment, d *domai
 	}
 
 	return &domain.PaymentCreationResult{
-		ProviderReference: p.OrderID, 
+		ProviderReference: p.OrderID,
 		PaymentToken:      snapResp.Token,
 		RedirectURL:       snapResp.RedirectURL,
 	}, nil

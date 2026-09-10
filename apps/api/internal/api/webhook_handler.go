@@ -81,7 +81,7 @@ func (h *WebhookHandler) MidtransNotification(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Generate Idempotency Key - Midtrans can send multiple hooks. 
+	// Generate Idempotency Key - Midtrans can send multiple hooks.
 	// The transaction ID + status + status code represents a unique state progression.
 	idempotencyKey := "midtrans_" + transactionID + "_" + transactionStatus + "_" + statusCode
 
@@ -100,7 +100,7 @@ func (h *WebhookHandler) MidtransNotification(w http.ResponseWriter, r *http.Req
 
 	err = h.webhookSvc.ProcessNotification(r.Context(), notif)
 	if err != nil {
-		// If it's a domain validation error (e.g. invalid state transition, mismatch amount), 
+		// If it's a domain validation error (e.g. invalid state transition, mismatch amount),
 		// we should still return 200 to Midtrans so it stops retrying, or maybe 400 depending on strategy.
 		// Usually returning 200 is best so provider doesn't spam us for an unfixable error like amount mismatch.
 		if err == domain.ErrInvalidStateTransition || err == domain.ErrDuplicate {
@@ -108,7 +108,7 @@ func (h *WebhookHandler) MidtransNotification(w http.ResponseWriter, r *http.Req
 			w.Write([]byte("OK"))
 			return
 		}
-		
+
 		// For transient errors like DB timeouts, let provider retry
 		http.Error(w, "Internal Error", http.StatusInternalServerError)
 		return

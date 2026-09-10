@@ -20,7 +20,6 @@ import (
 	"carefund-api/internal/service"
 )
 
-
 func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService) {
 	cfg := &config.Config{
 		Env:        "test",
@@ -54,14 +53,12 @@ func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService
 		);
 	`)
 
-
 	tables := []string{"idempotency_keys", "payment_events", "refunds", "payments", "donations", "settlement_items", "settlements", "campaigns", "categories", "user_roles", "roles", "users"}
 	for _, table := range tables {
 		_, _ = db.ExecContext(context.Background(), "DELETE FROM "+table)
 	}
 
 	_, _ = db.ExecContext(context.Background(), "INSERT INTO roles (name) VALUES ('DONOR'), ('CAMPAIGN_OWNER'), ('ADMIN')")
-
 
 	txManager := database.NewTransactionManager(db)
 	userRepo := database.NewUserRepository(db)
@@ -76,7 +73,7 @@ func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService
 
 	mockGw := midtrans.NewMockPaymentGateway()
 	donationSvc := service.NewDonationService(database.NewDonationRepository(db), database.NewPaymentRepository(db), campRepo, mockGw, txManager)
-	
+
 	webhookSvc := service.NewWebhookService(database.NewPaymentRepository(db), database.NewDonationRepository(db), database.NewPaymentEventRepository(db), txManager, service.WithWebhookIdempotencyRepository(idempotencyRepo))
 
 	router := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, cfg)
@@ -261,15 +258,15 @@ func TestBOLAObjectLevelAuthorizationAPI(t *testing.T) {
 	campRepo := database.NewCampaignRepository(db)
 	now := time.Now()
 	camp := &domain.Campaign{
-		OwnerID:       userA.ID,
-		CategoryID:    cat.ID,
-		Title:         "Active Camp",
-		Slug:          "active-camp",
-		Description:   "Desc",
-		TargetAmount:  1000000,
-		Status:        domain.CampaignStateActive,
-		StartAt:       now.Add(-time.Hour),
-		EndAt:         now.Add(24 * time.Hour),
+		OwnerID:      userA.ID,
+		CategoryID:   cat.ID,
+		Title:        "Active Camp",
+		Slug:         "active-camp",
+		Description:  "Desc",
+		TargetAmount: 1000000,
+		Status:       domain.CampaignStateActive,
+		StartAt:      now.Add(-time.Hour),
+		EndAt:        now.Add(24 * time.Hour),
 	}
 	_ = campRepo.Create(ctx, camp)
 
@@ -600,11 +597,9 @@ func TestDonationHTTPIdempotency(t *testing.T) {
 
 	err = db.QueryRow("INSERT INTO campaigns (owner_id, category_id, title, slug, description, target_amount, status, start_at, end_at) VALUES ($1, $2, 'Camp Idem', 'camp-idem', 'Desc', 1000000, 'ACTIVE', NOW(), NOW() + INTERVAL '30 days') RETURNING id", userID, catID).Scan(&campID)
 
-
 	if err != nil {
 		t.Fatalf("failed to insert campaign: %v", err)
 	}
-
 
 	donorUser := &domain.User{ID: userID, Email: "donor_idem@example.com", Name: "Donor Idem"}
 	token, _ := authSvc.GenerateAccessToken(donorUser, []string{"DONOR"})
@@ -712,6 +707,7 @@ func TestTrustedProxyIPExtraction(t *testing.T) {
 		t.Errorf("expected forwarded IP 198.51.100.42, got %s", ipProxy)
 	}
 }
+
 // TestConcurrentIdempotencyDuplicatePrevention verifies that 20 concurrent HTTP requests
 // sharing the same (user_id, Idempotency-Key, payload) never create more than one
 // Donation, Payment, or idempotency_keys record in PostgreSQL.
@@ -926,7 +922,7 @@ func TestConcurrentIdempotencyDifferentPayload(t *testing.T) {
 	// To find the loser payload, we must find the winner payload.
 	var winningHash string
 	db.QueryRow("SELECT request_hash FROM idempotency_keys WHERE user_id = $1 AND idempotency_key = $2", userID, idemKey).Scan(&winningHash)
-	
+
 	// Prepare a loser payload that definitely hashes differently
 	loserBody := []byte(`{"campaign_id":"` + campID + `","amount":99999,"is_anonymous":true,"message":"Loser Request"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/donations", bytes.NewBuffer(loserBody))
@@ -1114,4 +1110,3 @@ func TestIdempotencyFailureScenarios(t *testing.T) {
 		}
 	})
 }
-

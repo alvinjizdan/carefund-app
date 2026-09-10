@@ -151,7 +151,9 @@ func (h *CampaignHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("campaign_id")
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
-	var req struct{ Reason string `json:"reason"` }
+	var req struct {
+		Reason string `json:"reason"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 
 	if err := h.campSvc.RejectCampaign(r.Context(), authUser.ID, id, req.Reason); err != nil {
@@ -160,7 +162,6 @@ func (h *CampaignHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, SuccessResponse{Data: "rejected"})
 }
-
 
 func (h *CampaignHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 	authUser := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser)

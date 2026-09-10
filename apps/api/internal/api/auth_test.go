@@ -27,7 +27,7 @@ func TestRefreshTokenFlow(t *testing.T) {
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	data := resp["data"].(map[string]interface{})
-	
+
 	oldAccess := data["access_token"].(string)
 	oldRefresh := data["refresh_token"].(string)
 
@@ -52,7 +52,7 @@ func TestRefreshTokenFlow(t *testing.T) {
 	var refResp map[string]interface{}
 	json.Unmarshal(w2.Body.Bytes(), &refResp)
 	refData := refResp["data"].(map[string]interface{})
-	
+
 	newAccess := refData["access_token"].(string)
 	newRefresh := refData["refresh_token"].(string)
 
@@ -78,7 +78,7 @@ func TestRefreshTokenFlow(t *testing.T) {
 	req4.Header.Set("Authorization", "Bearer "+newAccess)
 	w4 := httptest.NewRecorder()
 	router.ServeHTTP(w4, req4)
-	
+
 	if w4.Code != http.StatusOK {
 		t.Errorf("expected 200 OK for logout, got %d", w4.Code)
 	}

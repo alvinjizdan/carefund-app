@@ -7,7 +7,9 @@ import (
 
 // IdempotencyStatus represents the state of an idempotency record.
 // PENDING:   Key reserved inside the financial DB transaction; Midtrans not yet called.
-//            Response fields (code, body) are NULL.
+//
+//	Response fields (code, body) are NULL.
+//
 // COMPLETED: Midtrans responded successfully; response_code and response_body are populated.
 // FAILED:    Midtrans returned a definitive (non-ambiguous) rejection.
 const (
@@ -54,7 +56,6 @@ type IdempotencyRepository interface {
 	// RecoverFailedByOrderID allows a background worker or webhook to transition a PENDING record to FAILED.
 	RecoverFailedByOrderID(ctx context.Context, orderID string) error
 }
-
 
 // sentinelError is a simple unexported error type for domain sentinel values.
 type sentinelError struct{ s string }

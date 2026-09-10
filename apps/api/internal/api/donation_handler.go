@@ -35,6 +35,7 @@ func NewDonationHandler(donationSvc service.DonationService, idempotencyRepo dom
 // Flow when an Idempotency-Key is present:
 //
 //  1. Decode and validate the request body; compute SHA256(requestHash).
+//
 //  2. Look up the idempotency_keys table for (user_id, key, expires_at > NOW()).
 //     a. COMPLETED record + matching hash  → replay cached response.
 //     b. COMPLETED record + mismatched hash → 400 Bad Request.
@@ -188,7 +189,6 @@ func (h *DonationHandler) createDonationIdempotent(
 		return
 	}
 
-
 	// PHASE 5: Return the response.
 	logger.Info(r.Context(), "Donation initiated successfully",
 		logger.F("component", "DonationHandler"),
@@ -230,7 +230,6 @@ func (h *DonationHandler) handleExistingIdempotencyRecord(
 	case domain.IdempotencyStatusFailed:
 		// Definitive Midtrans rejection. Inform the client; do not replay.
 		RespondJSON(w, http.StatusUnprocessableEntity, ErrorResponse{Error: ErrorDetail{Code: "payment_failed", Message: "The original payment attempt was definitively rejected by the payment provider. Please initiate a new request with a new Idempotency-Key."}})
-
 
 	default:
 		RespondError(w, r, fmt.Errorf("unexpected idempotency status: %s", record.Status))

@@ -49,10 +49,10 @@ func TestCampaignStateTransitions(t *testing.T) {
 func TestCampaignValidation(t *testing.T) {
 	// Simple validation tests for fields we check
 	now := time.Now()
-	
+
 	validTarget := int64(1000)
 	invalidTarget := int64(0)
-	
+
 	validStart := now
 	validEnd := now.Add(24 * time.Hour)
 	invalidEnd := now.Add(-24 * time.Hour)

@@ -141,7 +141,6 @@ func GetIP(r *http.Request) string {
 	return MakeIPExtractor("")(r)
 }
 
-
 func RateLimit(rl *RateLimiter, keyExtractor func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

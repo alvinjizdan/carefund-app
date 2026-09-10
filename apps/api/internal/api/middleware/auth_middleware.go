@@ -55,7 +55,7 @@ func Auth(authSvc service.AuthService) func(http.Handler) http.Handler {
 
 			userID, _ := claims["sub"].(string)
 			email, _ := claims["email"].(string)
-			
+
 			// Parse roles safely
 			var roles []string
 			if rawRoles, ok := claims["roles"].([]interface{}); ok {

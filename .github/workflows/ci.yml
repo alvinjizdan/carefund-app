@@ -383,6 +383,7 @@ jobs:
             -e DB_PASSWORD=ci_disposable_password_987 \
             -e DB_NAME=carefund-app_test \
             -e DB_SSLMODE=disable \
+            -e JWT_SECRET=ci-jwt-secret-testing-key-32bytes \
             -e MIDTRANS_SERVER_KEY=ci-midtrans-mock-server-key \
             carefund-worker:ci -once
 

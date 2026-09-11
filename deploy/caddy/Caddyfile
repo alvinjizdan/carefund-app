@@ -1,0 +1,33 @@
+{
+    admin off
+}
+
+{$DOMAIN} {
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+
+    request_body {
+        max_size 2MB
+    }
+
+    respond /metrics* 404
+
+    reverse_proxy api:8080 {
+        transport http {
+            dial_timeout 5s
+            response_header_timeout 35s
+        }
+    }
+}

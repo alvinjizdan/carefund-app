@@ -1,0 +1,229 @@
+# ==============================================================================
+# CareFund Backend — Prometheus Alert Rules
+# Phase: 5M.5B.1 (Observability Assets)
+# All alerts correspond strictly to existing metrics emitted by CareFund API & Worker.
+# ==============================================================================
+
+groups:
+  # ----------------------------------------------------------------------------
+  # 1. Service Availability & Lifecycle
+  # ----------------------------------------------------------------------------
+  - name: carefund_availability
+    rules:
+      - alert: APIInstanceDown
+        expr: up{job="carefund-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "CareFund API metrics target is down"
+          description: "Prometheus cannot scrape CareFund API at {{ $labels.instance }} for more than 1 minute. The API process may have crashed or stopped responding."
+
+      - alert: WorkerInstanceDown
+        expr: up{job="carefund-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: worker
+        annotations:
+          summary: "CareFund Worker metrics target is down"
+          description: "Prometheus cannot scrape CareFund Worker at {{ $labels.instance }} for more than 1 minute. The worker daemon may have terminated or hung."
+
+      - alert: WorkerHeartbeatMissing
+        expr: (time() - worker_last_heartbeat_timestamp_seconds) > 180
+        for: 1m
+        labels:
+          severity: critical
+          component: worker
+        annotations:
+          summary: "Worker heartbeat missing for {{ $labels.worker_type }}"
+          description: "Worker loop {{ $labels.worker_type }} has not emitted a heartbeat in over 3 minutes. The worker loop may be deadlocked or stuck on external I/O."
+
+      - alert: WorkerFrequentRestarts
+        expr: increase(worker_start_total[5m]) > 2
+        for: 2m
+        labels:
+          severity: warning
+          component: worker
+        annotations:
+          summary: "Frequent worker restarts detected for {{ $labels.worker_type }}"
+          description: "Worker {{ $labels.worker_type }} has restarted {{ $value }} times within the last 5 minutes, indicating potential crash-looping or resource instability."
+
+  # ----------------------------------------------------------------------------
+  # 2. Transactional Outbox & Event Processing
+  # ----------------------------------------------------------------------------
+  - name: carefund_outbox
+    rules:
+      - alert: OutboxDeadLetterDetected
+        expr: increase(outbox_events_dead_letter_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: outbox
+        annotations:
+          summary: "Outbox event permanently failed (DEAD_LETTER) for {{ $labels.event_type }}"
+          description: "One or more transactional outbox events of type {{ $labels.event_type }} have exhausted all retry attempts and moved to DEAD_LETTER status."
+
+      - alert: OutboxBacklogGrowing
+        expr: sum by (event_type) (outbox_events_pending) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: outbox
+        annotations:
+          summary: "Outbox pending backlog elevated for {{ $labels.event_type }}"
+          description: "There are {{ $value }} unleased pending outbox events of type {{ $labels.event_type }} for more than 5 minutes. Processing rate may be lagging ingestion."
+
+      - alert: OutboxRetryRateElevated
+        expr: sum by (event_type) (rate(outbox_events_retry_total[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: outbox
+        annotations:
+          summary: "Elevated retry rate for outbox events {{ $labels.event_type }}"
+          description: "Outbox processing for {{ $labels.event_type }} is experiencing {{ $value | printf \"%.2f\" }} retries/sec over the last 5 minutes due to transient failures."
+
+  # ----------------------------------------------------------------------------
+  # 3. Financial Integrity & Reconciliation
+  # ----------------------------------------------------------------------------
+  - name: carefund_financial_integrity
+    rules:
+      - alert: FinancialAnomalyDetected
+        expr: increase(financial_anomalies_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: financial_integrity
+        annotations:
+          summary: "Financial anomaly detected: {{ $labels.anomaly_type }}"
+          description: "The CareFund financial anomaly monitor detected {{ $value }} instance(s) of {{ $labels.anomaly_type }} requiring immediate administrative review."
+
+      - alert: PaymentReconciliationMismatchDetected
+        expr: increase(payments_reconciliation_mismatches_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+          component: reconciliation
+        annotations:
+          summary: "Payment state mismatch detected (provider: {{ $labels.provider_status }}, local: {{ $labels.local_status }})"
+          description: "The reconciliation worker detected {{ $value }} payment status divergence(s) between the gateway ({{ $labels.provider_status }}) and the database ({{ $labels.local_status }})."
+
+      - alert: PendingPaymentsAgedPastTTL
+        expr: payments_pending{age_bucket="gt_45m"} > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: payment
+        annotations:
+          summary: "Pending payments aged past 45-minute TTL"
+          description: "There are {{ $value }} payments remaining in PENDING status older than 45 minutes that have not been reconciled or expired by the background sweeper."
+
+      - alert: SettlementExecutionFailed
+        expr: increase(settlements_failed_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: settlement
+        annotations:
+          summary: "Campaign settlement execution failed"
+          description: "One or more campaign settlements failed or were rejected due to ledger balance discrepancies."
+
+      - alert: RefundProviderErrorsDetected
+        expr: increase(refunds_provider_result_total{result=~"provider_error|network_error|timeout"}[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+          component: refund
+        annotations:
+          summary: "Refund gateway error: {{ $labels.result }}"
+          description: "Upstream refund communication with payment gateway failed with {{ $labels.result }} in the last 5 minutes."
+
+      - alert: ReconciliationRepeatedSweepFailures
+        expr: increase(worker_reconciliation_duration_seconds_count{result="failure"}[10m]) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          component: reconciliation
+        annotations:
+          summary: "Periodic payment reconciliation sweeps failing"
+          description: "The reconciliation worker recorded {{ $value }} failed sweeps in the last 10 minutes."
+
+  # ----------------------------------------------------------------------------
+  # 4. HTTP Performance & Reliability
+  # ----------------------------------------------------------------------------
+  - name: carefund_api_performance
+    rules:
+      - alert: APIHigh5xxErrorRate
+        expr: |
+          (
+            sum by (job) (rate(http_requests_total{job="carefund-api", status_code=~"5.."}[5m]))
+            /
+            sum by (job) (rate(http_requests_total{job="carefund-api"}[5m]))
+          ) * 100 > 5
+          and
+          sum by (job) (rate(http_requests_total{job="carefund-api"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API 5xx server error rate exceeds 5%"
+          description: "HTTP 5xx server error rate on {{ $labels.job }} is {{ $value | printf \"%.2f\" }}% over a 5-minute sustained window."
+
+      - alert: APIHighLatencyP99
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="carefund-api", normalized_route!~"/health|/ready|/metrics"}[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API 99th percentile latency exceeds 2 seconds"
+          description: "P99 latency on business API endpoints is {{ $value | printf \"%.2f\" }} seconds over the last 5 minutes."
+
+      - alert: PaymentGatewayCallLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, provider, operation) (rate(payment_provider_request_duration_seconds_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: payment_gateway
+        annotations:
+          summary: "Payment provider call latency exceeds 5s for {{ $labels.provider }} {{ $labels.operation }}"
+          description: "P95 response latency for {{ $labels.provider }} {{ $labels.operation }} is {{ $value | printf \"%.2f\" }} seconds over 5 minutes."
+
+  # ----------------------------------------------------------------------------
+  # 5. Database Connection Pool Health (sql.DBStats)
+  # Pool Baseline: MaxOpenConns = 25, MaxIdleConns = 10
+  # ----------------------------------------------------------------------------
+  - name: carefund_database_pool
+    rules:
+      - alert: PostgreSQLConnectionPoolExhaustion
+        expr: db_in_use_connections >= 23
+        for: 3m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL in-use connections approaching pool ceiling (25) on {{ $labels.job }}"
+          description: "Database connection pool on {{ $labels.job }} has {{ $value }} connections in active use (limit 25) for more than 3 minutes."
+
+      - alert: PostgreSQLConnectionPoolAcquisitionWaiting
+        expr: rate(db_wait_count_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Goroutines blocked waiting for database connections on {{ $labels.job }}"
+          description: "Database pool on {{ $labels.job }} is experiencing connection wait events ({{ $value | printf \"%.2f\" }} waits/sec) over the last 3 minutes."
+
+      - alert: PostgreSQLConnectionWaitDurationElevated
+        expr: rate(db_wait_duration_seconds_total[5m]) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Elevated connection wait duration on {{ $labels.job }}"
+          description: "Total blocked connection wait duration on {{ $labels.job }} is {{ $value | printf \"%.2f\" }} seconds/sec over the last 3 minutes."

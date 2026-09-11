@@ -31,9 +31,9 @@ func main() {
 
 	ctx := context.Background()
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadMigrateConfig()
 	if err != nil {
-		logger.Fatal(ctx, "Failed to load application configuration", err, logger.F("component", "Migrator"))
+		logger.Fatal(ctx, "Failed to load migration configuration", err, logger.F("component", "Migrator"))
 	}
 
 	if err := RunMigration(ctx, cfg, *migrationsPath, *direction); err != nil {

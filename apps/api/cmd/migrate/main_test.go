@@ -124,3 +124,48 @@ func TestRunMigration_MigrationOrderingAndExecution(t *testing.T) {
 		t.Fatalf("asymmetric migration count: %d up vs %d down", upCount, downCount)
 	}
 }
+
+func TestLoadMigrateConfig_Integration(t *testing.T) {
+	origEnv := os.Getenv("ENV")
+	origHost := os.Getenv("DB_HOST")
+	origPort := os.Getenv("DB_PORT")
+	origUser := os.Getenv("DB_USER")
+	origPass := os.Getenv("DB_PASSWORD")
+	origName := os.Getenv("DB_NAME")
+	origSSL := os.Getenv("DB_SSLMODE")
+	origJWT := os.Getenv("JWT_SECRET")
+	origMid := os.Getenv("MIDTRANS_SERVER_KEY")
+	origCORS := os.Getenv("CORS_ALLOWED_ORIGINS")
+
+	defer func() {
+		os.Setenv("ENV", origEnv)
+		os.Setenv("DB_HOST", origHost)
+		os.Setenv("DB_PORT", origPort)
+		os.Setenv("DB_USER", origUser)
+		os.Setenv("DB_PASSWORD", origPass)
+		os.Setenv("DB_NAME", origName)
+		os.Setenv("DB_SSLMODE", origSSL)
+		os.Setenv("JWT_SECRET", origJWT)
+		os.Setenv("MIDTRANS_SERVER_KEY", origMid)
+		os.Setenv("CORS_ALLOWED_ORIGINS", origCORS)
+	}()
+
+	os.Setenv("ENV", "production")
+	os.Setenv("DB_HOST", "127.0.0.1")
+	os.Setenv("DB_PORT", "5432")
+	os.Setenv("DB_USER", "postgres")
+	os.Setenv("DB_PASSWORD", "test-db-pass")
+	os.Setenv("DB_NAME", "carefund_test")
+	os.Setenv("DB_SSLMODE", "require")
+	os.Unsetenv("JWT_SECRET")
+	os.Unsetenv("MIDTRANS_SERVER_KEY")
+	os.Unsetenv("CORS_ALLOWED_ORIGINS")
+
+	cfg, err := config.LoadMigrateConfig()
+	if err != nil {
+		t.Fatalf("expected LoadMigrateConfig to succeed without app secrets, got: %v", err)
+	}
+	if cfg.DBPassword != "test-db-pass" {
+		t.Errorf("expected DBPassword 'test-db-pass', got '%s'", cfg.DBPassword)
+	}
+}

@@ -319,3 +319,161 @@ func TestDatabaseConnectionPoolAndDSNTimeouts(t *testing.T) {
 		t.Fatalf("DSN missing custom idle_in_transaction_session_timeout=6000: %s", dsn)
 	}
 }
+
+func TestLoad_ProductionRequiresAppSecrets(t *testing.T) {
+	restore := clearEnv(t)
+	defer restore()
+
+	setupValidProd := func() {
+		os.Setenv("ENV", "production")
+		os.Setenv("DB_PASSWORD", "super-secret-db-pw")
+		os.Setenv("DB_SSLMODE", "require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt")
+		os.Setenv("MIDTRANS_SERVER_KEY", "super-secret-midtrans")
+		os.Setenv("CORS_ALLOWED_ORIGINS", "https://carefund.org")
+	}
+
+	t.Run("missing JWT_SECRET fails fast", func(t *testing.T) {
+		setupValidProd()
+		os.Unsetenv("JWT_SECRET")
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when JWT_SECRET is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "JWT_SECRET is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing MIDTRANS_SERVER_KEY fails fast", func(t *testing.T) {
+		setupValidProd()
+		os.Unsetenv("MIDTRANS_SERVER_KEY")
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when MIDTRANS_SERVER_KEY is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "MIDTRANS_SERVER_KEY is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing CORS_ALLOWED_ORIGINS fails fast", func(t *testing.T) {
+		setupValidProd()
+		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when CORS_ALLOWED_ORIGINS is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("localhost CORS_ALLOWED_ORIGINS fails fast in production", func(t *testing.T) {
+		setupValidProd()
+		os.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected error when CORS_ALLOWED_ORIGINS is localhost in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS is required and cannot default to localhost") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestLoadMigrateConfig_ProductionIsolation(t *testing.T) {
+	restore := clearEnv(t)
+	defer restore()
+
+	setupValidMigrateProd := func() {
+		os.Setenv("ENV", "production")
+		os.Setenv("DB_HOST", "managed-db.internal")
+		os.Setenv("DB_PORT", "5432")
+		os.Setenv("DB_USER", "carefund_app")
+		os.Setenv("DB_PASSWORD", "prod-migrate-db-password")
+		os.Setenv("DB_NAME", "carefund_prod")
+		os.Setenv("DB_SSLMODE", "require")
+		// Explicitly ensure application-layer secrets and CORS are UNSET
+		os.Unsetenv("JWT_SECRET")
+		os.Unsetenv("MIDTRANS_SERVER_KEY")
+		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+	}
+
+	t.Run("succeeds with only database configuration present", func(t *testing.T) {
+		setupValidMigrateProd()
+
+		cfg, err := config.LoadMigrateConfig()
+		if err != nil {
+			t.Fatalf("expected LoadMigrateConfig to succeed with only DB config, got: %v", err)
+		}
+
+		if cfg.DBHost != "managed-db.internal" {
+			t.Errorf("expected DBHost 'managed-db.internal', got '%s'", cfg.DBHost)
+		}
+		if cfg.DBPassword != "prod-migrate-db-password" {
+			t.Errorf("expected DBPassword 'prod-migrate-db-password', got '%s'", cfg.DBPassword)
+		}
+		if cfg.DBSSLMode != "require" {
+			t.Errorf("expected DBSSLMode 'require', got '%s'", cfg.DBSSLMode)
+		}
+		// Confirm DSN is correctly generated
+		dsn := cfg.DSN()
+		if !strings.Contains(dsn, "host=managed-db.internal") || !strings.Contains(dsn, "sslmode=require") {
+			t.Fatalf("unexpected DSN generated: %s", dsn)
+		}
+	})
+
+	t.Run("fails when DB_PASSWORD is absent in production", func(t *testing.T) {
+		setupValidMigrateProd()
+		os.Unsetenv("DB_PASSWORD")
+
+		_, err := config.LoadMigrateConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_PASSWORD is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_PASSWORD is required in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("fails when DB_SSLMODE is disable or empty in production", func(t *testing.T) {
+		setupValidMigrateProd()
+		os.Setenv("DB_SSLMODE", "disable")
+
+		_, err := config.LoadMigrateConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is disable in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_SSLMODE cannot be 'disable' in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		os.Unsetenv("DB_SSLMODE")
+		_, err = config.LoadMigrateConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is empty in production, got nil")
+		}
+	})
+
+	t.Run("development permits default fallback password and disable SSL", func(t *testing.T) {
+		os.Setenv("ENV", "development")
+		os.Unsetenv("DB_PASSWORD")
+		os.Unsetenv("DB_SSLMODE")
+
+		cfg, err := config.LoadMigrateConfig()
+		if err != nil {
+			t.Fatalf("unexpected error in development LoadMigrateConfig: %v", err)
+		}
+		if cfg.DBPassword != "234djisamSOE" {
+			t.Errorf("expected fallback '234djisamSOE', got '%s'", cfg.DBPassword)
+		}
+		if cfg.DBSSLMode != "disable" {
+			t.Errorf("expected default 'disable', got '%s'", cfg.DBSSLMode)
+		}
+	})
+}

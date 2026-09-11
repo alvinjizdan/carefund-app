@@ -39,36 +39,10 @@ type Config struct {
 	TrustedProxyCIDRs   string
 }
 
-func Load() (*Config, error) {
-	_ = godotenv.Load() // Ignore error if .env doesn't exist
-
-	jwtTTLStr := getEnv("JWT_ACCESS_TTL", "15m")
-	jwtTTL, err := time.ParseDuration(jwtTTLStr)
-	if err != nil {
-		jwtTTL = 15 * time.Minute
-	}
-
-	paymentTTLStr := getEnv("PAYMENT_PENDING_TTL", "45m")
-	paymentTTL, err := time.ParseDuration(paymentTTLStr)
-	if err != nil {
-		paymentTTL = 45 * time.Minute
-	}
-
-	outboxTTLStr := getEnv("OUTBOX_PROCESSING_TTL", "15m")
-	outboxTTL, err := time.ParseDuration(outboxTTLStr)
-	if err != nil {
-		outboxTTL = 15 * time.Minute
-	}
-
-	corsOrigins := getEnv("CORS_ALLOWED_ORIGINS", "")
-	env := getEnv("ENV", "development")
-	if corsOrigins == "" && env != "production" {
-		corsOrigins = "http://localhost:3000"
-	}
-
+func populateDBConfig(cfg *Config) {
 	// Database password: In production, no hardcoded fallback is permitted.
 	dbPassword := os.Getenv("DB_PASSWORD")
-	if env != "production" && dbPassword == "" {
+	if cfg.Env != "production" && dbPassword == "" {
 		dbPassword = "234djisamSOE"
 	}
 
@@ -113,6 +87,79 @@ func Load() (*Config, error) {
 		dbIdleTxTimeout = 10 * time.Second
 	}
 
+	cfg.DBHost = getEnv("DB_HOST", "localhost")
+	cfg.DBPort = getEnv("DB_PORT", "5432")
+	cfg.DBUser = getEnv("DB_USER", "postgres")
+	cfg.DBPassword = dbPassword
+	cfg.DBName = getEnv("DB_NAME", "carefund-app")
+	cfg.DBSSLMode = getEnv("DB_SSLMODE", "disable")
+	cfg.DBMaxOpenConns = dbMaxOpenConns
+	cfg.DBMaxIdleConns = dbMaxIdleConns
+	cfg.DBConnMaxLifetime = dbConnMaxLifetime
+	cfg.DBStatementTimeout = dbStatementTimeout
+	cfg.DBLockTimeout = dbLockTimeout
+	cfg.DBIdleTxTimeout = dbIdleTxTimeout
+}
+
+func validateDBConfig(cfg *Config) error {
+	if cfg.Env == "production" {
+		if cfg.DBPassword == "" {
+			return errors.New("DB_PASSWORD is required in production and cannot use a default fallback")
+		}
+		if cfg.DBSSLMode == "disable" || cfg.DBSSLMode == "" {
+			return errors.New("DB_SSLMODE cannot be 'disable' in production; encrypted PostgreSQL transport is required (e.g. require, verify-ca, verify-full)")
+		}
+	}
+	return nil
+}
+
+// LoadMigrateConfig loads and validates configuration strictly required for database migrations.
+// It isolates database connectivity and TLS transport requirements from application-level
+// secrets (JWT, Midtrans) and web routing concerns (CORS, Ports).
+func LoadMigrateConfig() (*Config, error) {
+	_ = godotenv.Load() // Ignore error if .env doesn't exist
+
+	env := getEnv("ENV", "development")
+	cfg := &Config{
+		Env: env,
+	}
+
+	populateDBConfig(cfg)
+
+	if err := validateDBConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func Load() (*Config, error) {
+	_ = godotenv.Load() // Ignore error if .env doesn't exist
+
+	jwtTTLStr := getEnv("JWT_ACCESS_TTL", "15m")
+	jwtTTL, err := time.ParseDuration(jwtTTLStr)
+	if err != nil {
+		jwtTTL = 15 * time.Minute
+	}
+
+	paymentTTLStr := getEnv("PAYMENT_PENDING_TTL", "45m")
+	paymentTTL, err := time.ParseDuration(paymentTTLStr)
+	if err != nil {
+		paymentTTL = 45 * time.Minute
+	}
+
+	outboxTTLStr := getEnv("OUTBOX_PROCESSING_TTL", "15m")
+	outboxTTL, err := time.ParseDuration(outboxTTLStr)
+	if err != nil {
+		outboxTTL = 15 * time.Minute
+	}
+
+	corsOrigins := getEnv("CORS_ALLOWED_ORIGINS", "")
+	env := getEnv("ENV", "development")
+	if corsOrigins == "" && env != "production" {
+		corsOrigins = "http://localhost:3000"
+	}
+
 	// Metrics listener host binding: default loopback "127.0.0.1" for safety, overridable via env
 	metricsHost := getEnv("METRICS_HOST", "127.0.0.1")
 	workerMetricsHost := getEnv("WORKER_METRICS_HOST", "127.0.0.1")
@@ -124,18 +171,6 @@ func Load() (*Config, error) {
 		WorkerMetricsHost:   workerMetricsHost,
 		WorkerMetricsPort:   getEnv("WORKER_METRICS_PORT", "9091"),
 		Env:                 env,
-		DBHost:              getEnv("DB_HOST", "localhost"),
-		DBPort:              getEnv("DB_PORT", "5432"),
-		DBUser:              getEnv("DB_USER", "postgres"),
-		DBPassword:          dbPassword,
-		DBName:              getEnv("DB_NAME", "carefund-app"),
-		DBSSLMode:           getEnv("DB_SSLMODE", "disable"),
-		DBMaxOpenConns:      dbMaxOpenConns,
-		DBMaxIdleConns:      dbMaxIdleConns,
-		DBConnMaxLifetime:   dbConnMaxLifetime,
-		DBStatementTimeout:  dbStatementTimeout,
-		DBLockTimeout:       dbLockTimeout,
-		DBIdleTxTimeout:     dbIdleTxTimeout,
 		JWTSecret:           getEnv("JWT_SECRET", ""),
 		JWTAccessTTL:        jwtTTL,
 		MidtransServerKey:   getEnv("MIDTRANS_SERVER_KEY", ""),
@@ -145,6 +180,12 @@ func Load() (*Config, error) {
 		OutboxProcessingTTL: outboxTTL,
 		CORSAllowedOrigins:  corsOrigins,
 		TrustedProxyCIDRs:   getEnv("TRUSTED_PROXY_CIDRS", ""),
+	}
+
+	populateDBConfig(cfg)
+
+	if err := validateDBConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	if cfg.Env != "test" {
@@ -157,14 +198,8 @@ func Load() (*Config, error) {
 	}
 
 	if cfg.Env == "production" {
-		if cfg.DBPassword == "" {
-			return nil, errors.New("DB_PASSWORD is required in production and cannot use a default fallback")
-		}
 		if cfg.CORSAllowedOrigins == "" || cfg.CORSAllowedOrigins == "http://localhost:3000" {
 			return nil, errors.New("CORS_ALLOWED_ORIGINS is required and cannot default to localhost in production")
-		}
-		if cfg.DBSSLMode == "disable" || cfg.DBSSLMode == "" {
-			return nil, errors.New("DB_SSLMODE cannot be 'disable' in production; encrypted PostgreSQL transport is required (e.g. require, verify-ca, verify-full)")
 		}
 	}
 

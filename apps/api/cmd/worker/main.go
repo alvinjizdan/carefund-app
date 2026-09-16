@@ -23,7 +23,7 @@ func main() {
 	runOnce := flag.Bool("once", false, "Execute a single worker cycle and exit")
 	flag.Parse()
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadWorkerConfig()
 	if err != nil {
 		logger.Fatal(context.Background(), "Failed to load config", err, logger.F("component", "Worker"))
 	}

@@ -133,7 +133,7 @@ func LoadMigrateConfig() (*Config, error) {
 	return cfg, nil
 }
 
-func Load() (*Config, error) {
+func loadBaseConfig() *Config {
 	_ = godotenv.Load() // Ignore error if .env doesn't exist
 
 	jwtTTLStr := getEnv("JWT_ACCESS_TTL", "15m")
@@ -154,11 +154,7 @@ func Load() (*Config, error) {
 		outboxTTL = 15 * time.Minute
 	}
 
-	corsOrigins := getEnv("CORS_ALLOWED_ORIGINS", "")
 	env := getEnv("ENV", "development")
-	if corsOrigins == "" && env != "production" {
-		corsOrigins = "http://localhost:3000"
-	}
 
 	// Metrics listener host binding: default loopback "127.0.0.1" for safety, overridable via env
 	metricsHost := getEnv("METRICS_HOST", "127.0.0.1")
@@ -178,11 +174,20 @@ func Load() (*Config, error) {
 		MidtransEnvironment: getEnv("MIDTRANS_ENVIRONMENT", "sandbox"),
 		PaymentPendingTTL:   paymentTTL,
 		OutboxProcessingTTL: outboxTTL,
-		CORSAllowedOrigins:  corsOrigins,
+		CORSAllowedOrigins:  getEnv("CORS_ALLOWED_ORIGINS", ""),
 		TrustedProxyCIDRs:   getEnv("TRUSTED_PROXY_CIDRS", ""),
 	}
 
 	populateDBConfig(cfg)
+	return cfg
+}
+
+func Load() (*Config, error) {
+	cfg := loadBaseConfig()
+
+	if cfg.CORSAllowedOrigins == "" && cfg.Env != "production" {
+		cfg.CORSAllowedOrigins = "http://localhost:3000"
+	}
 
 	if err := validateDBConfig(cfg); err != nil {
 		return nil, err
@@ -200,6 +205,27 @@ func Load() (*Config, error) {
 	if cfg.Env == "production" {
 		if cfg.CORSAllowedOrigins == "" || cfg.CORSAllowedOrigins == "http://localhost:3000" {
 			return nil, errors.New("CORS_ALLOWED_ORIGINS is required and cannot default to localhost in production")
+		}
+	}
+
+	return cfg, nil
+}
+
+// LoadWorkerConfig loads and validates configuration required specifically for background workers.
+// Workers require database connectivity, Midtrans credentials (for reconciliation and refunds),
+// operational timeouts, and worker metrics configuration.
+// Browser/API-only concerns (such as CORS_ALLOWED_ORIGINS) and client JWT authentication secrets
+// are excluded from required validation.
+func LoadWorkerConfig() (*Config, error) {
+	cfg := loadBaseConfig()
+
+	if err := validateDBConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	if cfg.Env != "test" {
+		if cfg.MidtransServerKey == "" {
+			return nil, errors.New("MIDTRANS_SERVER_KEY is required")
 		}
 	}
 

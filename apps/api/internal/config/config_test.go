@@ -17,7 +17,7 @@ func clearEnv(t *testing.T) func() {
 		"DB_USER", "DB_NAME", "DB_SSLMODE", "DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS",
 		"DB_CONN_MAX_LIFETIME", "DB_STATEMENT_TIMEOUT", "DB_LOCK_TIMEOUT",
 		"DB_IDLE_IN_TRANSACTION_TIMEOUT", "JWT_SECRET", "MIDTRANS_SERVER_KEY",
-		"CORS_ALLOWED_ORIGINS",
+		"MIDTRANS_CLIENT_KEY", "CORS_ALLOWED_ORIGINS",
 	}
 
 	saved := make(map[string]string)
@@ -474,6 +474,169 @@ func TestLoadMigrateConfig_ProductionIsolation(t *testing.T) {
 		}
 		if cfg.DBSSLMode != "disable" {
 			t.Errorf("expected default 'disable', got '%s'", cfg.DBSSLMode)
+		}
+	})
+}
+
+func TestLoadWorkerConfig_ProductionIsolationAndValidation(t *testing.T) {
+	restore := clearEnv(t)
+	defer restore()
+
+	setupValidWorkerProd := func() {
+		os.Setenv("ENV", "production")
+		os.Setenv("DB_HOST", "carefund-pg-prodlike")
+		os.Setenv("DB_PORT", "5432")
+		os.Setenv("DB_USER", "carefund_prod")
+		os.Setenv("DB_PASSWORD", "prod-worker-db-pass")
+		os.Setenv("DB_NAME", "carefund_production")
+		os.Setenv("DB_SSLMODE", "require")
+		os.Setenv("MIDTRANS_SERVER_KEY", "prod-midtrans-server-key")
+		os.Setenv("WORKER_METRICS_HOST", "0.0.0.0")
+		os.Setenv("WORKER_METRICS_PORT", "9091")
+		// Explicitly ensure CORS_ALLOWED_ORIGINS, JWT_SECRET, and MIDTRANS_CLIENT_KEY are UNSET
+		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+		os.Unsetenv("JWT_SECRET")
+		os.Unsetenv("MIDTRANS_CLIENT_KEY")
+	}
+
+	t.Run("A. worker production config succeeds without CORS, JWT, or MIDTRANS_CLIENT_KEY", func(t *testing.T) {
+		setupValidWorkerProd()
+
+		cfg, err := config.LoadWorkerConfig()
+		if err != nil {
+			t.Fatalf("expected LoadWorkerConfig to succeed without CORS/JWT/MIDTRANS_CLIENT_KEY in production, got: %v", err)
+		}
+
+		if cfg.DBHost != "carefund-pg-prodlike" {
+			t.Errorf("expected DBHost 'carefund-pg-prodlike', got '%s'", cfg.DBHost)
+		}
+		if cfg.DBPassword != "prod-worker-db-pass" {
+			t.Errorf("expected DBPassword 'prod-worker-db-pass', got '%s'", cfg.DBPassword)
+		}
+		if cfg.DBSSLMode != "require" {
+			t.Errorf("expected DBSSLMode 'require', got '%s'", cfg.DBSSLMode)
+		}
+		if cfg.MidtransServerKey != "prod-midtrans-server-key" {
+			t.Errorf("expected MidtransServerKey 'prod-midtrans-server-key', got '%s'", cfg.MidtransServerKey)
+		}
+		if cfg.MidtransClientKey != "" {
+			t.Errorf("expected empty MidtransClientKey, got '%s'", cfg.MidtransClientKey)
+		}
+		if cfg.WorkerMetricsAddress() != "0.0.0.0:9091" {
+			t.Errorf("expected WorkerMetricsAddress '0.0.0.0:9091', got '%s'", cfg.WorkerMetricsAddress())
+		}
+		if cfg.PaymentPendingTTL != 45*time.Minute {
+			t.Errorf("expected default PaymentPendingTTL 45m, got %v", cfg.PaymentPendingTTL)
+		}
+		if cfg.OutboxProcessingTTL != 15*time.Minute {
+			t.Errorf("expected default OutboxProcessingTTL 15m, got %v", cfg.OutboxProcessingTTL)
+		}
+	})
+
+	t.Run("B. API production config still requires CORS when absent", func(t *testing.T) {
+		setupValidWorkerProd()
+		// Provide JWT_SECRET so that config.Load() advances to CORS validation
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-32-chars-length")
+		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+
+		_, err := config.Load()
+		if err == nil {
+			t.Fatal("expected config.Load() to fail in production when CORS_ALLOWED_ORIGINS is absent, got nil")
+		}
+		if !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS is required and cannot default to localhost") {
+			t.Fatalf("unexpected error message from config.Load(): %v", err)
+		}
+	})
+
+	t.Run("C. worker production still rejects insecure DB SSL", func(t *testing.T) {
+		setupValidWorkerProd()
+		os.Setenv("DB_SSLMODE", "disable")
+
+		_, err := config.LoadWorkerConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is disable in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_SSLMODE cannot be 'disable' in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		os.Unsetenv("DB_SSLMODE")
+		_, err = config.LoadWorkerConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_SSLMODE is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_SSLMODE cannot be 'disable' in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("D. worker production rejects missing DB_PASSWORD", func(t *testing.T) {
+		setupValidWorkerProd()
+		os.Unsetenv("DB_PASSWORD")
+
+		_, err := config.LoadWorkerConfig()
+		if err == nil {
+			t.Fatal("expected error when DB_PASSWORD is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "DB_PASSWORD is required in production") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("D. worker rejects missing MIDTRANS_SERVER_KEY in production and development", func(t *testing.T) {
+		setupValidWorkerProd()
+		os.Unsetenv("MIDTRANS_SERVER_KEY")
+
+		// Production without MIDTRANS_SERVER_KEY
+		_, err := config.LoadWorkerConfig()
+		if err == nil {
+			t.Fatal("expected error when MIDTRANS_SERVER_KEY is unset in production, got nil")
+		}
+		if !strings.Contains(err.Error(), "MIDTRANS_SERVER_KEY is required") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		// Development without MIDTRANS_SERVER_KEY
+		os.Setenv("ENV", "development")
+		_, err = config.LoadWorkerConfig()
+		if err == nil {
+			t.Fatal("expected error when MIDTRANS_SERVER_KEY is unset in development, got nil")
+		}
+		if !strings.Contains(err.Error(), "MIDTRANS_SERVER_KEY is required") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		// Test environment permits unset MIDTRANS_SERVER_KEY
+		os.Setenv("ENV", "test")
+		cfg, err := config.LoadWorkerConfig()
+		if err != nil {
+			t.Fatalf("expected LoadWorkerConfig to succeed in test mode without MIDTRANS_SERVER_KEY, got: %v", err)
+		}
+		if cfg.MidtransServerKey != "" {
+			t.Errorf("expected empty MidtransServerKey in test mode, got '%s'", cfg.MidtransServerKey)
+		}
+	})
+
+	t.Run("F. worker development defaults", func(t *testing.T) {
+		os.Setenv("ENV", "development")
+		os.Setenv("MIDTRANS_SERVER_KEY", "dev-midtrans-key")
+		os.Unsetenv("DB_PASSWORD")
+		os.Unsetenv("DB_SSLMODE")
+		os.Unsetenv("WORKER_METRICS_HOST")
+		os.Unsetenv("WORKER_METRICS_PORT")
+
+		cfg, err := config.LoadWorkerConfig()
+		if err != nil {
+			t.Fatalf("unexpected error in development LoadWorkerConfig: %v", err)
+		}
+		if cfg.DBPassword != "234djisamSOE" {
+			t.Errorf("expected dev DBPassword fallback '234djisamSOE', got '%s'", cfg.DBPassword)
+		}
+		if cfg.DBSSLMode != "disable" {
+			t.Errorf("expected dev DBSSLMode default 'disable', got '%s'", cfg.DBSSLMode)
+		}
+		if cfg.WorkerMetricsAddress() != "127.0.0.1:9091" {
+			t.Errorf("expected default WorkerMetricsAddress '127.0.0.1:9091', got '%s'", cfg.WorkerMetricsAddress())
 		}
 	})
 }

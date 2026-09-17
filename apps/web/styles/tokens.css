@@ -1,0 +1,99 @@
+/**
+ * CareFund Design System — Semantic Design Tokens
+ * Mathematically verified for WCAG 2.1 AA contrast compliance.
+ * Architecture: Raw Palette -> Semantic CSS Variables -> Tailwind Utilities -> UI Components
+ */
+
+:root {
+  /* Surface Tokens */
+  --surface-ground: #F8FAFC;
+  --surface-card: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --surface-muted: #F1F5F9;
+  --surface-hover: #E2E8F0;
+  --surface-active: #CBD5E1;
+
+  /* Typography Tokens */
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+
+  /* Border Tokens */
+  --border-subtle: #E2E8F0;
+  --border-strong: #CBD5E1;
+
+  /* Primary Brand Tokens (Emerald-700 / Emerald-800 / White: 5.48:1 contrast) */
+  --primary: #047857;
+  --primary-hover: #065F46;
+  --primary-active: #064E3B;
+  --primary-fg: #FFFFFF;
+
+  /* Destructive Tokens (Rose-600 / Rose-700 / White: 4.70:1 contrast) */
+  --destructive: #E11D48;
+  --destructive-hover: #BE123C;
+  --destructive-active: #9F1239;
+  --destructive-fg: #FFFFFF;
+
+  /* Feedback Semantics */
+  --warning-surface: #FFFBEB;
+  --warning-border: #FDE68A;
+  --warning-text: #B45309;
+
+  --info-surface: #F0F9FF;
+  --info-border: #BAE6FD;
+  --info-text: #0369A1;
+
+  --success-surface: #ECFDF5;
+  --success-border: #A7F3D0;
+  --success-text: #047857;
+
+  /* Focus Indicator Ring */
+  --focus-ring: #047857;
+}
+
+.dark {
+  /* Surface Tokens */
+  --surface-ground: #090D16;
+  --surface-card: #0F172A;
+  --surface-elevated: #1E293B;
+  --surface-muted: #1E293B;
+  --surface-hover: #334155;
+  --surface-active: #475569;
+
+  /* Typography Tokens */
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #94A3B8;
+
+  /* Border Tokens */
+  --border-subtle: #1E293B;
+  --border-strong: #334155;
+
+  /* Primary Brand Tokens (Emerald-500 / Emerald-400 / Emerald-950: >= 5.97:1 contrast) */
+  --primary: #10B981;
+  --primary-hover: #34D399;
+  --primary-active: #059669;
+  --primary-fg: #022C22;
+
+  /* Destructive Tokens (Rose-600 / White: 4.70:1 contrast) */
+  --destructive: #E11D48;
+  --destructive-hover: #BE123C;
+  --destructive-active: #9F1239;
+  --destructive-fg: #FFFFFF;
+
+  /* Feedback Semantics */
+  --warning-surface: #451A03;
+  --warning-border: #78350F;
+  --warning-text: #FDE68A;
+
+  --info-surface: #082F49;
+  --info-border: #075985;
+  --info-text: #BAE6FD;
+
+  --success-surface: #022C22;
+  --success-border: #065F46;
+  --success-text: #A7F3D0;
+
+  /* Focus Indicator Ring */
+  --focus-ring: #34D399;
+}

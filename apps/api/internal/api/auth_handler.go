@@ -27,6 +27,31 @@ type registerRequest struct {
 	Password string `json:"password"`
 }
 
+type UserResponse struct {
+	ID        string    `json:"ID"`
+	Email     string    `json:"Email"`
+	Name      string    `json:"Name"`
+	Phone     *string   `json:"Phone"`
+	IsActive  bool      `json:"IsActive"`
+	CreatedAt time.Time `json:"CreatedAt"`
+	UpdatedAt time.Time `json:"UpdatedAt"`
+}
+
+func toUserResponse(u *domain.User) *UserResponse {
+	if u == nil {
+		return nil
+	}
+	return &UserResponse{
+		ID:        u.ID,
+		Email:     u.Email,
+		Name:      u.Name,
+		Phone:     u.Phone,
+		IsActive:  u.IsActive,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+	}
+}
+
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -69,7 +94,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	RespondJSON(w, http.StatusCreated, SuccessResponse{
 		Data: map[string]interface{}{
-			"user":          user,
+			"user":          toUserResponse(user),
 			"access_token":  accessToken,
 			"refresh_token": rawRefresh,
 		},

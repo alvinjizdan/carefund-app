@@ -58,7 +58,15 @@ func (h *CampaignHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *CampaignHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("campaign_id") // Go 1.22 routing
-	campaign, err := h.campSvc.GetCampaign(r.Context(), id)
+
+	var viewerID string
+	var viewerRoles []string
+	if authUser, ok := r.Context().Value(middleware.UserKey).(*middleware.AuthenticatedUser); ok && authUser != nil {
+		viewerID = authUser.ID
+		viewerRoles = authUser.Roles
+	}
+
+	campaign, err := h.campSvc.GetCampaignForViewer(r.Context(), id, viewerID, viewerRoles)
 	if err != nil {
 		RespondError(w, r, err)
 		return
@@ -89,6 +97,9 @@ func (h *CampaignHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		RespondError(w, r, err)
 		return
+	}
+	if campaigns == nil {
+		campaigns = []*domain.Campaign{}
 	}
 
 	RespondJSON(w, http.StatusOK, SuccessResponse{Data: campaigns, Meta: map[string]int{"limit": limit, "offset": offset}})

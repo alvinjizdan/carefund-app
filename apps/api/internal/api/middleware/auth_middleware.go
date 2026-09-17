@@ -78,6 +78,52 @@ func Auth(authSvc service.AuthService) func(http.Handler) http.Handler {
 	}
 }
 
+func OptionalAuth(authSvc service.AuthService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+			token, err := authSvc.ValidateToken(tokenStr)
+			if err != nil || !token.Valid {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			claims, ok := token.Claims.(jwt.MapClaims)
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			userID, _ := claims["sub"].(string)
+			email, _ := claims["email"].(string)
+
+			var roles []string
+			if rawRoles, ok := claims["roles"].([]interface{}); ok {
+				for _, r := range rawRoles {
+					if strRole, ok := r.(string); ok {
+						roles = append(roles, strRole)
+					}
+				}
+			}
+
+			authUser := &AuthenticatedUser{
+				ID:    userID,
+				Email: email,
+				Roles: roles,
+			}
+
+			ctx := context.WithValue(r.Context(), UserKey, authUser)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 func RequireRole(role string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -114,6 +114,7 @@ func (r *campaignRepo) List(ctx context.Context, limit, offset int) ([]*domain.C
 	query := `
 		SELECT id, owner_id, category_id, title, slug, description, target_amount, current_amount, start_at, end_at, status, rejection_reason, created_at, updated_at
 		FROM campaigns
+		WHERE status = 'ACTIVE'
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
 	`
@@ -123,12 +124,13 @@ func (r *campaignRepo) List(ctx context.Context, limit, offset int) ([]*domain.C
 	}
 	defer rows.Close()
 
-	var campaigns []*domain.Campaign
+	campaigns := make([]*domain.Campaign, 0)
 	for rows.Next() {
 		var c domain.Campaign
 		if err := rows.Scan(&c.ID, &c.OwnerID, &c.CategoryID, &c.Title, &c.Slug, &c.Description, &c.TargetAmount, &c.CurrentAmount, &c.StartAt, &c.EndAt, &c.Status, &c.RejectionReason, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
+		c.RejectionReason = nil
 		campaigns = append(campaigns, &c)
 	}
 	return campaigns, rows.Err()

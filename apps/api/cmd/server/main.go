@@ -40,6 +40,7 @@ func main() {
 	userRepo := database.NewUserRepository(db)
 	roleRepo := database.NewRoleRepository(db)
 	campRepo := database.NewCampaignRepository(db)
+	catRepo := database.NewCategoryRepository(db)
 	rtRepo := database.NewRefreshTokenRepository(db)
 	idempotencyRepo := database.NewIdempotencyRepository(db)
 
@@ -53,7 +54,7 @@ func main() {
 	webhookSvc := service.NewWebhookService(database.NewPaymentRepository(db), database.NewDonationRepository(db), database.NewPaymentEventRepository(db), txManager, service.WithWebhookIdempotencyRepository(idempotencyRepo))
 
 	// Router
-	handler := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, cfg)
+	handler := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, catRepo, cfg)
 
 	// Custom ServeMux for Health & Readiness (or registered directly in router)
 	mux := http.NewServeMux()

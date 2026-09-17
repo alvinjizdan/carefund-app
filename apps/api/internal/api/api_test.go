@@ -59,6 +59,7 @@ func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService
 	userRepo := database.NewUserRepository(db)
 	roleRepo := database.NewRoleRepository(db)
 	campRepo := database.NewCampaignRepository(db)
+	catRepo := database.NewCategoryRepository(db)
 	rtRepo := database.NewRefreshTokenRepository(db)
 	idempotencyRepo := database.NewIdempotencyRepository(db)
 
@@ -71,7 +72,7 @@ func setupTestAPI(t *testing.T) (*database.DB, http.Handler, service.AuthService
 
 	webhookSvc := service.NewWebhookService(database.NewPaymentRepository(db), database.NewDonationRepository(db), database.NewPaymentEventRepository(db), txManager, service.WithWebhookIdempotencyRepository(idempotencyRepo))
 
-	router := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, cfg)
+	router := api.NewRouter(authSvc, userSvc, campSvc, donationSvc, webhookSvc, rtRepo, roleRepo, idempotencyRepo, catRepo, cfg)
 
 	return db, router, authSvc
 }
@@ -96,6 +97,25 @@ func TestRegisterAndLoginAPI(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("expected 201 Created, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var regResp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &regResp); err != nil {
+		t.Fatalf("failed to parse register response: %v", err)
+	}
+	regData, ok := regResp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing data in register response: %v", regResp)
+	}
+	regUser, ok := regData["user"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing user in register response data: %v", regData)
+	}
+	if _, exists := regUser["PasswordHash"]; exists {
+		t.Errorf("SECURITY DEFECT: PasswordHash leaked in user response: %v", regUser)
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("PasswordHash")) {
+		t.Errorf("SECURITY DEFECT: raw body contains PasswordHash")
 	}
 
 	// 2. Login
@@ -1102,6 +1122,291 @@ func TestIdempotencyFailureScenarios(t *testing.T) {
 		db.QueryRow("SELECT COUNT(*) FROM donations WHERE campaign_id = $1", campID).Scan(&donCount)
 		if donCount > 1 {
 			t.Errorf("CONCURRENCY VIOLATION Scenario G: expected at most 1 donation, found %d", donCount)
+		}
+	})
+}
+
+func TestPhase5O2ContractRemediation(t *testing.T) {
+	db, router, authSvc := setupTestAPI(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// ==========================================
+	// 1. GAP-01: CORS Preflight Allows Idempotency-Key
+	// ==========================================
+	t.Run("GAP-01_CORS_Allows_Idempotency_Key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/api/v1/donations", nil)
+		req.Header.Set("Origin", "http://localhost:3000")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "Idempotency-Key, Authorization, Content-Type")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("expected 204 No Content for OPTIONS, got %d", w.Code)
+		}
+		allowHeaders := w.Header().Get("Access-Control-Allow-Headers")
+		if !bytes.Contains([]byte(allowHeaders), []byte("Idempotency-Key")) {
+			t.Errorf("expected Access-Control-Allow-Headers to include Idempotency-Key, got: %s", allowHeaders)
+		}
+	})
+
+	// ==========================================
+	// 2. GAP-02: User Registration Response DTO
+	// ==========================================
+	t.Run("GAP-02_Register_No_PasswordHash", func(t *testing.T) {
+		reqBody := map[string]string{
+			"name":     "Secure Donor",
+			"email":    "secure_donor@example.com",
+			"password": "secret_password_123",
+		}
+		bodyBytes, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBuffer(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+		}
+
+		// Verify JSON response parsing
+		var resp map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode json: %v", err)
+		}
+		data := resp["data"].(map[string]interface{})
+		user := data["user"].(map[string]interface{})
+
+		// PasswordHash must NOT exist in map
+		if _, exists := user["PasswordHash"]; exists {
+			t.Errorf("SECURITY DEFECT: PasswordHash leaked in user object: %v", user)
+		}
+		if _, exists := user["password_hash"]; exists {
+			t.Errorf("SECURITY DEFECT: password_hash leaked in user object: %v", user)
+		}
+		// Raw body must NOT contain the string "PasswordHash" or "password_hash"
+		raw := w.Body.String()
+		if bytes.Contains([]byte(raw), []byte("PasswordHash")) || bytes.Contains([]byte(raw), []byte("password_hash")) {
+			t.Errorf("SECURITY DEFECT: raw response body contains password hash field: %s", raw)
+		}
+		// Confirm standard fields exist
+		for _, field := range []string{"ID", "Email", "Name", "IsActive", "CreatedAt", "UpdatedAt"} {
+			if _, exists := user[field]; !exists {
+				t.Errorf("expected field %s in user response", field)
+			}
+		}
+	})
+
+	// ==========================================
+	// 3. GAP-04: Categories Read-Only Endpoint
+	// ==========================================
+	t.Run("GAP-04_Categories_Endpoint", func(t *testing.T) {
+		catRepo := database.NewCategoryRepository(db)
+
+		// A. Empty categories returns []
+		_, _ = db.ExecContext(ctx, "DELETE FROM categories")
+		reqEmpty := httptest.NewRequest(http.MethodGet, "/api/v1/categories", nil)
+		wEmpty := httptest.NewRecorder()
+		router.ServeHTTP(wEmpty, reqEmpty)
+
+		if wEmpty.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for categories, got %d", wEmpty.Code)
+		}
+		var emptyResp map[string]interface{}
+		json.Unmarshal(wEmpty.Body.Bytes(), &emptyResp)
+		emptyData, ok := emptyResp["data"].([]interface{})
+		if !ok || len(emptyData) != 0 {
+			t.Errorf("expected empty array [] in data, got %v", emptyResp["data"])
+		}
+
+		// B. Active vs Inactive categories
+		cat1 := &domain.Category{Name: "Active Category 1", Slug: "active-1", IsActive: true}
+		cat2 := &domain.Category{Name: "Active Category 2", Slug: "active-2", IsActive: true}
+		catInactive := &domain.Category{Name: "Inactive Category", Slug: "inactive", IsActive: false}
+		_ = catRepo.Create(ctx, cat1)
+		_ = catRepo.Create(ctx, cat2)
+		_ = catRepo.Create(ctx, catInactive)
+
+		reqActive := httptest.NewRequest(http.MethodGet, "/api/v1/categories", nil)
+		wActive := httptest.NewRecorder()
+		router.ServeHTTP(wActive, reqActive)
+
+		if wActive.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for categories, got %d", wActive.Code)
+		}
+		var activeResp map[string]interface{}
+		json.Unmarshal(wActive.Body.Bytes(), &activeResp)
+		items := activeResp["data"].([]interface{})
+		if len(items) != 2 {
+			t.Errorf("expected 2 active categories, got %d", len(items))
+		}
+	})
+
+	// ==========================================
+	// 4. GAP-05: Public Campaign Visibility & Redaction
+	// ==========================================
+	t.Run("GAP-05_Campaign_Visibility_And_Redaction", func(t *testing.T) {
+		userRepo := database.NewUserRepository(db)
+		campRepo := database.NewCampaignRepository(db)
+		catRepo := database.NewCategoryRepository(db)
+
+		// Setup users: Creator, Other User (Donor), Admin
+		creator := &domain.User{Email: "creator_v@example.com", PasswordHash: "h", Name: "Creator", IsActive: true}
+		_ = userRepo.Create(ctx, creator)
+		creatorToken, _ := authSvc.GenerateAccessToken(creator, []string{"CAMPAIGN_OWNER"})
+
+		otherUser := &domain.User{Email: "other_v@example.com", PasswordHash: "h", Name: "Other", IsActive: true}
+		_ = userRepo.Create(ctx, otherUser)
+		otherToken, _ := authSvc.GenerateAccessToken(otherUser, []string{"DONOR"})
+
+		adminUser := &domain.User{Email: "admin_v@example.com", PasswordHash: "h", Name: "Admin", IsActive: true}
+		_ = userRepo.Create(ctx, adminUser)
+		adminToken, _ := authSvc.GenerateAccessToken(adminUser, []string{"ADMIN"})
+
+		testCat := &domain.Category{Name: "Visibility Cat", Slug: "vis-cat", IsActive: true}
+		_ = catRepo.Create(ctx, testCat)
+
+		now := time.Now().Round(time.Microsecond)
+
+		// Helper to create campaign with specified status and rejection reason
+		createCampWithStatus := func(title, status string, rejReason *string) *domain.Campaign {
+			c := &domain.Campaign{
+				OwnerID:         creator.ID,
+				CategoryID:      testCat.ID,
+				Title:           title,
+				Slug:            title + "-" + time.Now().Format("20060102150405.000000"),
+				Description:     "Test Description",
+				TargetAmount:    1000000,
+				CurrentAmount:   0,
+				StartAt:         now,
+				EndAt:           now.Add(30 * 24 * time.Hour),
+				Status:          status,
+				RejectionReason: rejReason,
+			}
+			if err := campRepo.Create(ctx, c); err != nil {
+				t.Fatalf("failed to create test campaign: %v", err)
+			}
+			return c
+		}
+
+		rejReason := "Violates terms of service"
+		campDraft := createCampWithStatus("Camp Draft", domain.CampaignStateDraft, nil)
+		campPending := createCampWithStatus("Camp Pending", domain.CampaignStatePendingReview, nil)
+		campRejected := createCampWithStatus("Camp Rejected", domain.CampaignStateRejected, &rejReason)
+		campSuspended := createCampWithStatus("Camp Suspended", domain.CampaignStateSuspended, nil)
+		campActive := createCampWithStatus("Camp Active", domain.CampaignStateActive, nil)
+
+		// ----------------------------------------------------
+		// A. Public List GET /api/v1/campaigns
+		// Must return ONLY ACTIVE campaigns
+		// ----------------------------------------------------
+		reqList := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns", nil)
+		wList := httptest.NewRecorder()
+		router.ServeHTTP(wList, reqList)
+
+		if wList.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for campaign list, got %d", wList.Code)
+		}
+		var listResp map[string]interface{}
+		json.Unmarshal(wList.Body.Bytes(), &listResp)
+		listData := listResp["data"].([]interface{})
+		for _, item := range listData {
+			m := item.(map[string]interface{})
+			status := m["Status"].(string)
+			if status != domain.CampaignStateActive {
+				t.Errorf("VISIBILITY LEAK: non-active campaign with status %s appeared in public list", status)
+			}
+			if m["RejectionReason"] != nil {
+				t.Errorf("VISIBILITY LEAK: RejectionReason present in public list item: %v", m["RejectionReason"])
+			}
+		}
+
+		// ----------------------------------------------------
+		// B. GET /api/v1/campaigns/{id}
+		// Anonymous / Unauthorized caller:
+		// Non-active campaigns must return 404
+		// Active campaign must return 200 with RejectionReason redacted
+		// ----------------------------------------------------
+		nonActiveCamps := []*domain.Campaign{campDraft, campPending, campRejected, campSuspended}
+		for _, c := range nonActiveCamps {
+			// Anonymous
+			reqAnon := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns/"+c.ID, nil)
+			wAnon := httptest.NewRecorder()
+			router.ServeHTTP(wAnon, reqAnon)
+			if wAnon.Code != http.StatusNotFound {
+				t.Errorf("VISIBILITY DEFECT: anonymous access to %s campaign %s returned status %d, expected 404", c.Status, c.ID, wAnon.Code)
+			}
+
+			// Other authenticated user (donor)
+			reqOther := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns/"+c.ID, nil)
+			reqOther.Header.Set("Authorization", "Bearer "+otherToken)
+			wOther := httptest.NewRecorder()
+			router.ServeHTTP(wOther, reqOther)
+			if wOther.Code != http.StatusNotFound {
+				t.Errorf("VISIBILITY DEFECT: non-owner authenticated access to %s campaign %s returned status %d, expected 404", c.Status, c.ID, wOther.Code)
+			}
+		}
+
+		// Anonymous viewing ACTIVE campaign -> 200 OK
+		reqActiveAnon := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns/"+campActive.ID, nil)
+		wActiveAnon := httptest.NewRecorder()
+		router.ServeHTTP(wActiveAnon, reqActiveAnon)
+		if wActiveAnon.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for active campaign, got %d", wActiveAnon.Code)
+		}
+		var activeResp map[string]interface{}
+		json.Unmarshal(wActiveAnon.Body.Bytes(), &activeResp)
+		activeData := activeResp["data"].(map[string]interface{})
+		if activeData["RejectionReason"] != nil {
+			t.Errorf("LEAK: RejectionReason not nil for anonymous viewer: %v", activeData["RejectionReason"])
+		}
+
+		// ----------------------------------------------------
+		// C. Creator Access:
+		// Can view own DRAFT, PENDING_REVIEW, REJECTED, SUSPENDED, ACTIVE
+		// Can see RejectionReason on REJECTED
+		// ----------------------------------------------------
+		for _, c := range []*domain.Campaign{campDraft, campPending, campRejected, campSuspended, campActive} {
+			reqCreator := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns/"+c.ID, nil)
+			reqCreator.Header.Set("Authorization", "Bearer "+creatorToken)
+			wCreator := httptest.NewRecorder()
+			router.ServeHTTP(wCreator, reqCreator)
+			if wCreator.Code != http.StatusOK {
+				t.Errorf("CREATOR ACCESS DEFECT: creator could not view own %s campaign %s, got status %d", c.Status, c.ID, wCreator.Code)
+			}
+			if c.Status == domain.CampaignStateRejected {
+				var rejResp map[string]interface{}
+				json.Unmarshal(wCreator.Body.Bytes(), &rejResp)
+				rejData := rejResp["data"].(map[string]interface{})
+				if rejData["RejectionReason"] != "Violates terms of service" {
+					t.Errorf("CREATOR REASON DEFECT: expected creator to see rejection reason, got %v", rejData["RejectionReason"])
+				}
+			}
+		}
+
+		// ----------------------------------------------------
+		// D. Admin Access:
+		// Can view any campaign regardless of status and see RejectionReason
+		// ----------------------------------------------------
+		for _, c := range []*domain.Campaign{campDraft, campPending, campRejected, campSuspended, campActive} {
+			reqAdmin := httptest.NewRequest(http.MethodGet, "/api/v1/campaigns/"+c.ID, nil)
+			reqAdmin.Header.Set("Authorization", "Bearer "+adminToken)
+			wAdmin := httptest.NewRecorder()
+			router.ServeHTTP(wAdmin, reqAdmin)
+			if wAdmin.Code != http.StatusOK {
+				t.Errorf("ADMIN ACCESS DEFECT: admin could not view %s campaign %s, got status %d", c.Status, c.ID, wAdmin.Code)
+			}
+			if c.Status == domain.CampaignStateRejected {
+				var rejResp map[string]interface{}
+				json.Unmarshal(wAdmin.Body.Bytes(), &rejResp)
+				rejData := rejResp["data"].(map[string]interface{})
+				if rejData["RejectionReason"] != "Violates terms of service" {
+					t.Errorf("ADMIN REASON DEFECT: expected admin to see rejection reason, got %v", rejData["RejectionReason"])
+				}
+			}
 		}
 	})
 }

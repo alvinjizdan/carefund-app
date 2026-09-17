@@ -11,6 +11,7 @@ import (
 type CampaignService interface {
 	CreateCampaign(ctx context.Context, ownerID, categoryID, title, desc string, target int64, start, end time.Time) (*domain.Campaign, error)
 	GetCampaign(ctx context.Context, id string) (*domain.Campaign, error)
+	GetCampaignForViewer(ctx context.Context, id string, viewerID string, viewerRoles []string) (*domain.Campaign, error)
 	ListCampaigns(ctx context.Context, limit, offset int) ([]*domain.Campaign, error)
 	UpdateCampaign(ctx context.Context, actorID, id, title, desc, categoryID string, target int64, start, end time.Time) (*domain.Campaign, error)
 	SubmitForReview(ctx context.Context, actorID, id string) error
@@ -58,6 +59,34 @@ func (s *campaignService) CreateCampaign(ctx context.Context, ownerID, categoryI
 
 func (s *campaignService) GetCampaign(ctx context.Context, id string) (*domain.Campaign, error) {
 	return s.campaignRepo.FindByID(ctx, id)
+}
+
+func (s *campaignService) GetCampaignForViewer(ctx context.Context, id string, viewerID string, viewerRoles []string) (*domain.Campaign, error) {
+	camp, err := s.campaignRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	isAdmin := false
+	for _, r := range viewerRoles {
+		if r == "ADMIN" {
+			isAdmin = true
+			break
+		}
+	}
+
+	isOwner := viewerID != "" && camp.OwnerID == viewerID
+
+	if camp.Status != domain.CampaignStateActive && !isAdmin && !isOwner {
+		return nil, domain.ErrNotFound
+	}
+
+	campCopy := *camp
+	if !isAdmin && !isOwner {
+		campCopy.RejectionReason = nil
+	}
+
+	return &campCopy, nil
 }
 
 func (s *campaignService) ListCampaigns(ctx context.Context, limit, offset int) ([]*domain.Campaign, error) {

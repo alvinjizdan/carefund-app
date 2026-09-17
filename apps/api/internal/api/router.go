@@ -20,6 +20,7 @@ func NewRouter(
 	rtRepo domain.RefreshTokenRepository,
 	roleRepo domain.RoleRepository,
 	idempotencyRepo domain.IdempotencyRepository,
+	catRepo domain.CategoryRepository,
 	cfg *config.Config,
 ) http.Handler {
 	mux := http.NewServeMux()
@@ -28,9 +29,11 @@ func NewRouter(
 	campHandler := NewCampaignHandler(campSvc)
 	donHandler := NewDonationHandler(donationSvc, idempotencyRepo)
 	webhookHandler := NewWebhookHandler(webhookSvc, cfg)
+	catHandler := NewCategoryHandler(catRepo)
 
 	// Auth Middleware
 	authenticate := middleware.Auth(authSvc)
+	optionalAuth := middleware.OptionalAuth(authSvc)
 	requireAdmin := middleware.RequireRole("ADMIN")
 
 	// Rate Limiters
@@ -86,7 +89,10 @@ func NewRouter(
 
 	// Public Campaign Routes
 	mux.Handle("GET /api/v1/campaigns", generalRateLimit(http.HandlerFunc(campHandler.List)))
-	mux.Handle("GET /api/v1/campaigns/{campaign_id}", generalRateLimit(http.HandlerFunc(campHandler.Get)))
+	mux.Handle("GET /api/v1/campaigns/{campaign_id}", generalRateLimit(optionalAuth(http.HandlerFunc(campHandler.Get))))
+
+	// Public Category Routes
+	mux.Handle("GET /api/v1/categories", generalRateLimit(http.HandlerFunc(catHandler.List)))
 
 	// Protected Campaign Routes (Owner/Authenticated)
 	mux.Handle("POST /api/v1/campaigns", generalRateLimit(authenticate(http.HandlerFunc(campHandler.Create))))

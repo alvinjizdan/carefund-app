@@ -22,6 +22,7 @@ export interface ActionError {
   message: string;
   status: number;
   requestId?: string;
+  retryAfter?: number;
 }
 
 export type ActionResult<TData> =
@@ -99,6 +100,7 @@ export function toActionError(err: unknown, fallbackRequestId?: string): ActionE
       message: sanitizeActionMessage(err.status, err.message),
       status: err.status,
       requestId: err.requestId || fallbackRequestId,
+      retryAfter: err.retryAfter,
     };
   }
 

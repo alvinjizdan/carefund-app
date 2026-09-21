@@ -36,6 +36,8 @@ import {
   normalizeDonationCreation,
   RawBackendDonationCreation,
   isValidMidtransRedirectUrl,
+  PaymentDetail,
+  getPaymentDetail,
 } from "../api/authenticated/donations";
 
 export interface CreateDonationInput {
@@ -301,3 +303,71 @@ export async function createDonationAction(
     },
   };
 }
+
+export interface GetPaymentStatusActionOptions {
+  client?: ServerApiClient;
+  requestId?: string;
+}
+
+/**
+ * Server Action to retrieve the latest authoritative payment status from the Go API.
+ *
+ * ARCHITECTURAL CONTRACTS:
+ * 1. Authority Delegation: Go API is the SOLE authority for payment status and authorization.
+ * 2. Parameter Security: paymentId must be a non-empty string adhering to valid identifier formats.
+ *    Client MUST NOT supply user tokens, donor IDs, roles, or authorization headers.
+ * 3. Cache & Retry Invariants: Strictly enforces cache: "no-store" and retries: 0 (strictly 1 HTTP request).
+ * 4. Error Sanitization: All errors mapped through toActionError() into sanitized ActionResult.
+ */
+export async function getPaymentStatusAction(
+  paymentId: string,
+  options?: GetPaymentStatusActionOptions
+): Promise<ActionResult<PaymentDetail>> {
+  const requestId = await resolveActionRequestId(options?.requestId);
+
+  if (!paymentId || typeof paymentId !== "string" || !paymentId.trim()) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Payment ID is required and must be a non-empty string.",
+        status: 400,
+        requestId,
+      },
+    };
+  }
+
+  const trimmedId = paymentId.trim();
+  // Safe identifier format: alphanumeric with hyphens/underscores, max 64 chars
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(trimmedId)) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid payment identifier format.",
+        status: 400,
+        requestId,
+      },
+    };
+  }
+
+  try {
+    const payment = await getPaymentDetail(trimmedId, {
+      client: options?.client,
+      requestId,
+      cache: "no-store",
+      retries: 0,
+    });
+
+    return {
+      ok: true,
+      data: payment,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: toActionError(err, requestId),
+    };
+  }
+}
+

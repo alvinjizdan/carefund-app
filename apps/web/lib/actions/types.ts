@@ -5,7 +5,7 @@
  * for all Next.js Server Actions across the application.
  *
  * CRITICAL SECURITY INVARIANTS:
- * 1. Action results must be plain serializable JavaScript objects (React 19 / Next.js 15).
+ * 1. Action results must be plain serializable JavaScript objects (React 18.3.1 / Next.js 15).
  * 2. Errors must be mapped to sanitized ActionError objects.
  * 3. Prohibits leaking:
  *    - Stack traces

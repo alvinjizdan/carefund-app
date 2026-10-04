@@ -1,19 +1,48 @@
+"use client";
+
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { useFormField } from "@/components/forms/form-field";
 
 export interface SelectProps
   extends React.SelectHTMLAttributes<HTMLSelectElement> {
   wrapperClassName?: string;
 }
 
+/**
+ * Native select for the form system.
+ *
+ * Mirrors `<Input>`: inside a `<FormField>` it inherits the field `id`,
+ * `aria-invalid` state and `aria-describedby` wiring, while explicit props
+ * passed by the call site always take precedence. The decorative chevron stays
+ * `aria-hidden`, so it is never announced.
+ */
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, wrapperClassName, disabled, required, children, ...props }, ref) => {
+  (
+    {
+      className,
+      wrapperClassName,
+      disabled,
+      required,
+      id,
+      "aria-describedby": ariaDescribedBy,
+      "aria-invalid": ariaInvalid,
+      children,
+      ...props
+    },
+    ref
+  ) => {
+    const field = useFormField();
+
     return (
       <div className={cn("relative w-full", wrapperClassName)}>
         <select
           ref={ref}
+          id={id ?? field?.id}
           disabled={disabled}
-          required={required}
+          required={required ?? field?.required}
+          aria-invalid={ariaInvalid ?? (field?.isInvalid ? true : undefined)}
+          aria-describedby={ariaDescribedBy ?? field?.ariaDescribedBy}
           className={cn(
             "flex h-10 w-full appearance-none rounded-lg border border-border-strong bg-surface-card px-3 py-2 pr-9 text-sm text-text-primary transition-colors",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card",

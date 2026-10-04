@@ -11,6 +11,22 @@ import { singleFlightRefresh } from "@/lib/auth/single-flight";
 import { BackendRefreshData, TokenPair } from "@/lib/auth/types";
 
 /**
+ * Builds the single canonical application login URL: `/auth/login?from=<path>`.
+ *
+ * F3.7.1 normalized every authentication redirect onto this one route with the
+ * single `from` query parameter, so middleware and page-level redirects no longer
+ * compete. An empty destination is omitted entirely, letting the login page apply
+ * its own default instead of receiving an empty string.
+ */
+function buildCanonicalLoginUrl(origin: string, safePath: string): URL {
+  const loginUrl = new URL("/auth/login", origin);
+  if (safePath) {
+    loginUrl.searchParams.set("from", safePath);
+  }
+  return loginUrl;
+}
+
+/**
  * Performs a single token refresh attempt against the Go backend.
  */
 async function performRefresh(
@@ -64,6 +80,7 @@ export async function middleware(req: NextRequest) {
   // Exclude auth route handlers, static assets, and internal routes from refresh logic
   if (
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/auth/login") ||
     pathname === "/unauthorized" ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico"
@@ -83,8 +100,7 @@ export async function middleware(req: NextRequest) {
   // 2. Unauthenticated check on protected routes
   if (isProtectedRoute && !accessToken && !refreshToken) {
     const safeRedirect = sanitizeRedirectPath(pathname + search);
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("redirect", safeRedirect);
+    const loginUrl = buildCanonicalLoginUrl(req.url, safeRedirect);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -108,8 +124,7 @@ export async function middleware(req: NextRequest) {
       // Refresh token is expired or revoked -> clear cookies
       if (isProtectedRoute) {
         const safeRedirect = sanitizeRedirectPath(pathname + search);
-        const loginUrl = new URL("/login", req.url);
-        loginUrl.searchParams.set("redirect", safeRedirect);
+        const loginUrl = buildCanonicalLoginUrl(req.url, safeRedirect);
         const redirectRes = NextResponse.redirect(loginUrl);
         clearAuthCookies(redirectRes);
         return redirectRes;
@@ -152,8 +167,7 @@ export async function middleware(req: NextRequest) {
         }
       } else if (!activeRefreshToken) {
         const safeRedirect = sanitizeRedirectPath(pathname + search);
-        const loginUrl = new URL("/login", req.url);
-        loginUrl.searchParams.set("redirect", safeRedirect);
+        const loginUrl = buildCanonicalLoginUrl(req.url, safeRedirect);
         const redirectRes = NextResponse.redirect(loginUrl);
         if (rotatedTokenPair) {
           setAuthCookies(redirectRes, rotatedTokenPair);

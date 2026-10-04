@@ -29,3 +29,4 @@ Thumbs.db
 
 # Freebuff local tooling metadata (do not track)
 .freebuff/
+.agents/

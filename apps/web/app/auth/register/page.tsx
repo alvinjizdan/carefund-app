@@ -10,49 +10,48 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/ui/card";
-import { LoginForm } from "@/components/auth/login-form";
+import { RegisterForm } from "@/components/auth/register-form";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Canonical login destination when no valid `from` is supplied.
- * Matches the existing authenticated landing page used by F3.5.
+ * Post-registration destination when no valid `from` is supplied.
+ * Mirrors the login page default.
  */
 const DEFAULT_REDIRECT = "/me";
 
 export const metadata: Metadata = {
-  title: "Sign In — CareFund",
+  title: "Create Account — CareFund",
   description:
-    "Sign in to your CareFund account to donate, start a campaign, or track your contributions.",
+    "Create a CareFund account to donate, start a crowdfunding campaign, or track your contributions.",
 };
 
-interface LoginPageProps {
+interface RegisterPageProps {
   searchParams: Promise<{ from?: string | string[] }>;
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   const params = await searchParams;
 
   // `from` may arrive repeated; only the first value is considered.
-  const requested =
-    Array.isArray(params?.from) ? params.from[0] : params?.from;
+  const requested = Array.isArray(params?.from) ? params.from[0] : params?.from;
 
   // Sanitize BEFORE any use. Rejects absolute URLs, protocol-relative URLs,
   // scheme prefixes, backslash escapes, and control-character payloads.
   const redirectTo = sanitizeRedirectPath(requested, DEFAULT_REDIRECT);
 
   // Reuse the existing session layer. No second session mechanism is introduced.
-  // SESSION_ERROR deliberately does NOT block the form: sign-in must remain
-  // available when the session lookup hits a transient upstream failure.
+  // SESSION_ERROR does not block the form, so signup stays available during a
+  // transient session-lookup failure.
   const session = await getSession();
   if (session.status === "AUTHENTICATED" && session.user) {
     redirect(redirectTo);
   }
 
   // Carry the sanitized destination through so a user who arrived from a protected
-  // page returns there after registering, without re-sanitizing at the destination.
-  const registerHref = `/auth/register?from=${encodeURIComponent(redirectTo)}`;
+  // page returns there after signing in, without re-sanitizing at the destination.
+  const signInHref = `/auth/login?from=${encodeURIComponent(redirectTo)}`;
 
   return (
     <main className="flex flex-1 items-center justify-center py-8 sm:py-12">
@@ -63,33 +62,33 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               CareFund
             </p>
             <h1 className="mt-2 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">
-              Sign in to your account
+              Create your account
             </h1>
             <p className="mt-2 text-sm text-text-secondary">
-              Access your donations, campaigns, and contribution history.
+              Join CareFund to donate, start a campaign, or track your impact.
             </p>
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Sign In</CardTitle>
+              <CardTitle className="text-lg">Create Account</CardTitle>
               <CardDescription>
-                Enter the email address and password associated with your
-                CareFund account.
+                All new accounts are registered with the DONOR role. Campaign and
+                administrative privileges are granted by CareFund administrators.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <LoginForm redirectTo={redirectTo} />
+              <RegisterForm redirectTo={redirectTo} />
             </CardContent>
           </Card>
 
           <p className="mt-6 text-center text-sm text-text-secondary">
-            Don&apos;t have an account?{" "}
+            Already have an account?{" "}
             <Link
-              href={registerHref}
+              href={signInHref}
               className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card"
             >
-              Create an account
+              Sign in
             </Link>
           </p>
         </div>
